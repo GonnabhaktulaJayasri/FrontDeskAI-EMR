@@ -35,38 +35,40 @@ export const inboundCall = async (req, res) => {
         } else {
             // ==================== STEP 2: NOT IN FHIR - CREATE NEW ====================
             console.log('Patient not in FHIR/EMR');
-            console.log('Creating new patient in FHIR...');
+            patientFhirId = null;
+            patientData = null;
+            // console.log('Creating new patient in FHIR...');
 
-            const newPatient = {
-                resourceType: 'Patient',
-                name: [{
-                    use: 'official',
-                    family: 'Patient',  // Placeholder - AI will collect
-                    given: ['New']      // Placeholder - AI will collect
-                }],
-                telecom: [{
-                    system: 'phone',
-                    value: normalizePhoneNumber(callerId),
-                    use: 'mobile'
-                }]
-            };
+            // const newPatient = {
+            //     resourceType: 'Patient',
+            //     name: [{
+            //         use: 'official',
+            //         family: 'Patient',  // Placeholder - AI will collect
+            //         given: ['New']      // Placeholder - AI will collect
+            //     }],
+            //     telecom: [{
+            //         system: 'phone',
+            //         value: normalizePhoneNumber(callerId),
+            //         use: 'mobile'
+            //     }]
+            // };
 
-            const createResult = await fhirService.createPatient(newPatient);
+            // const createResult = await fhirService.createPatient(newPatient);
 
-            if (createResult.success) {
-                patientFhirId = createResult.fhirId;
-                patientData = {
-                    id: createResult.fhirId,
-                    firstName: 'New',
-                    lastName: 'Patient',
-                    phone: normalizePhoneNumber(callerId)
-                };
-                patientSource = 'new_created';
-                console.log(`New patient created in FHIR: ${patientFhirId}`);
-            } else {
-                console.error('Failed to create patient in FHIR:', createResult.error);
-                return res.status(500).send("Error creating patient");
-            }
+            // if (createResult.success) {
+            //     patientFhirId = createResult.fhirId;
+            //     patientData = {
+            //         id: createResult.fhirId,
+            //         firstName: 'New',
+            //         lastName: 'Patient',
+            //         phone: normalizePhoneNumber(callerId)
+            //     };
+            //     patientSource = 'new_created';
+            //     console.log(`New patient created in FHIR: ${patientFhirId}`);
+            // } else {
+            //     console.error('Failed to create patient in FHIR:', createResult.error);
+            //     return res.status(500).send("Error creating patient");
+            // }
         }
 
         // ==================== FIND HOSPITAL (ORGANIZATION) ====================
@@ -164,6 +166,7 @@ export const inboundCall = async (req, res) => {
             callRecordId: callRecordId,
             from: callerId,
             to: to,
+            patientData: patientData,
             patientName: patientData?.firstName || 'Patient',
             hospital: hospitalData,
             contextKey: contextKey,

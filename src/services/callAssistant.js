@@ -7,12 +7,12 @@ import wav from "wav";
 import fhirService from "../services/fhirService.js";
 import fhirSearchService from "../services/fhirSearchService.js";
 import {
+    checkPatientExists,
     updatePatientInfo,
     updatePatientFromCall
 } from "./patient.js";
 import { processPrescriptionRefill } from './prescriptionRefill.js';
-import { loadPatientData, bookAppointment, findPatientAppointments, cancelAppointmentByDetails, rescheduleAppointmentByDetails, getFamilyAppointments } from "./appointment.js";
-import { checkPatientExists } from "./patient.js"
+import { loadPatientData, bookAppointment, findPatientAppointments, cancelAppointmentByDetails, rescheduleAppointmentByDetails } from "./appointment.js";
 import { AudioBufferManager, transcribeAudio } from "./transcription.js";
 
 function getInstructions(callContext, patientData, appointmentData) {
@@ -182,7 +182,7 @@ function getInstructions(callContext, patientData, appointmentData) {
         roleAndGreeting = `You are the Virtual receptionist for ${hospitalName}. Your role is to help patients with appointments, prescription refills, and general inquiries.
 
         GREETING:
-        - For new patients: "This is Virtual assistant,Thank you for calling ${hospitalName}. How can I help you today?"
+        - For new patients: "This is Virtual assistant,Thank you for calling ${hospitalName}.May I know your name, please?"
         - For returning patients: "Hello ${patientData?.firstName || 'there'}!, I am Virtual assistant from ${hospitalName}, How are you doing? What can I help you with today?"`;
 
         specificInstructions = `
@@ -190,7 +190,36 @@ function getInstructions(callContext, patientData, appointmentData) {
         - Listen to what the patient needs first
         - Be reactive to their requests
         - Use stored patient information efficiently
-        - Let the conversation flow naturally based on their needs`;
+        - Let the conversation flow naturally based on their needs
+
+        NEW PATIENT HANDLING:
+        - When a new caller connects (no existing patient record):
+        1. Greet them politely.
+        2. Once they provide their name, use it in all future responses.
+            Example: "Nice to meet you. How can I help you today?"
+        3. Do not immediately ask for all details like date of birth or gender.
+        4. Continue the conversation naturally — ask how you can help them.
+        5. If the caller says they want to:
+            - book an appointment
+            - check a report
+            - request medication
+            - or any task that requires patient data
+            then politely say:
+            "I’ll quickly register your details so I can proceed."
+            and collect:
+            - Last name
+            - Age
+            - Gender
+            - Date of birth
+        6. After collecting these, call the **create_patient** function.
+        7. Once the patient is created, use their name for all future references and proceed with the requested task.
+
+        REMEMBER:
+        - Always use the patient’s first name in friendly responses.
+        - Keep the flow conversational and natural.
+        - Don’t overwhelm with too many questions at once.
+        - Only create a patient when enough data is collected.
+`
     }
 
     return `${roleAndGreeting}
@@ -253,9 +282,9 @@ function getInstructions(callContext, patientData, appointmentData) {
            Ask: "Is this appointment for yourself, a family member, or a care center patient?"
            
            Listen for keywords:
-           - "for me", "myself", "I need" â†’ SELF
-           - "my son/daughter/mother/father/wife/husband", "family" â†’ FAMILY
-           - "care center", "nursing home", "resident" â†’ CARE_CENTER
+           - "for me", "myself", "I need" Ã¢â€ â€™ SELF
+           - "my son/daughter/mother/father/wife/husband", "family" Ã¢â€ â€™ FAMILY
+           - "care center", "nursing home", "resident" Ã¢â€ â€™ CARE_CENTER
 
         2. FOR SELF BOOKINGS:
            - Use caller's stored information
@@ -263,6 +292,7 @@ function getInstructions(callContext, patientData, appointmentData) {
            - Use book_appointment with booking_type: "self"
 
         3. FOR FAMILY BOOKINGS:
+           - Ask: "What is your relationship to them?" (spouse, parent, child, etc.)
            - Ask: "Have they been a patient here before?"
            
            IF YES:
@@ -277,41 +307,6 @@ function getInstructions(callContext, patientData, appointmentData) {
            - Then collect appointment details
            - Use book_appointment with booking_type: "family"
            - IMPORTANT: Book in FAMILY MEMBER'S NAME, not caller's name
-
-           
-        ### FAMILY APPOINTMENT BOOKING (booking_type: "family"):
-        When caller wants to book for someone else:
-
-        1. **Determine booking type FIRST:**
-        - Ask: "Is this appointment for yourself or someone else?"
-        - If for someone else: "What is your relationship to the patient?" (parent, spouse, child, etc.)
-
-        2. **Collect family member information:**
-        - Full name (first and last)
-        - Date of birth or age
-        - Phone number (may be same as caller's, but always ask)
-        
-        3. **Collect appointment details:**
-        - Preferred doctor or specialty
-        - Date and time preference
-        - Reason for visit
-
-        4. **Confirmation:**
-        - Summarize: "I'm booking an appointment for [family member name], your [relationship], with [doctor] on [date] at [time] for [reason]. Is this correct?"
-
-        5. **Important notes:**
-        - If booking for a minor, ensure caller is parent/guardian
-        - If booking for elderly parent, note caregiver relationship
-        - Confirm contact phone for appointment reminders
-
-        **Example dialogue:**
-        - Caller: "I need to book an appointment for my daughter"
-        - AI: "I'd be happy to help! What is your daughter's full name?"
-        - Caller: "Sarah Johnson"
-        - AI: "And what is Sarah's date of birth?"
-        - Caller: "May 15, 2015"
-        - AI: "What phone number should we use for appointment reminders?"
-        - ... continue with doctor, date, time, reason
 
         4. FOR CARE CENTER BOOKINGS:
            - Ask: "What is the patient's name?"
@@ -363,10 +358,10 @@ function getInstructions(callContext, patientData, appointmentData) {
         * Technical issues you cannot resolve
 
         TRANSFER SCENARIOS:
-        - "Can I speak to a real person?" â†’ "Absolutely! Let me connect you with our staff right away."
-        - "This is too complicated" â†’ "No problem! I'll transfer you to someone who can help."
-        - "I need to speak to someone about billing" â†’ "I'll transfer you to our billing department."
-        - "I have a complaint" â†’ "I understand. Let me connect you with our patient relations team."
+        - "Can I speak to a real person?" Ã¢â€ â€™ "Absolutely! Let me connect you with our staff right away."
+        - "This is too complicated" Ã¢â€ â€™ "No problem! I'll transfer you to someone who can help."
+        - "I need to speak to someone about billing" Ã¢â€ â€™ "I'll transfer you to our billing department."
+        - "I have a complaint" Ã¢â€ â€™ "I understand. Let me connect you with our patient relations team."
 
         IMPORTANT TRANSFER NOTES:
         - Always be positive about transfers - never make it seem like a failure
@@ -436,6 +431,7 @@ export async function callAssistant(connection, req) {
 
     let callLog = null;
     let patientId = callContext.patientId || null;
+    let patientInfo = callContext.patientData || null;
     let patientFhirId = callContext.patientFhirId || null;
     let callLogId = null;
     let conversationTranscript = [];
@@ -493,7 +489,7 @@ export async function callAssistant(connection, req) {
                             upcomingAppointments = result.upcomingAppointments;
                         }
                     } else {
-                        console.log('No patientId available, skipping patient data load');
+                        console.log('⚠️ No existing patient found — AI will collect details before creating.');
                     }
 
                     if (!callLogId) {
@@ -607,6 +603,23 @@ export async function callAssistant(connection, req) {
                         },
                     },
                     tools: [
+                        {
+                            type: "function",
+                            name: "create_patient",
+                            description: "Create a new patient in the EMR/FHIR system when no existing record is found.",
+                            parameters: {
+                                type: "object",
+                                properties: {
+                                    first_name: { type: "string", description: "Patient's first name" },
+                                    last_name: { type: "string", description: "Patient's last name" },
+                                    phone: { type: "string", description: "Patient's phone number" },
+                                    dob: { type: "string", description: "Date of birth in YYYY-MM-DD format" },
+                                    gender: { type: "string", enum: ["male", "female", "other", "unknown"], description: "Patient's gender" },
+                                    age: { type: "number", description: "Patient's age" }
+                                },
+                                required: ["first_name", "last_name", "dob", "age", "gender"]
+                            }
+                        },
                         {
                             type: "function",
                             name: "get_my_appointments",
@@ -1022,21 +1035,6 @@ export async function callAssistant(connection, req) {
                                 },
                                 required: ["booking_type"]
                             }
-                        },
-                        {
-                            type: "function",
-                            name: "get_family_appointments",
-                            description: "Retrieve all upcoming appointments for the caller's family members",
-                            parameters: {
-                                type: "object",
-                                properties: {
-                                    include_self: {
-                                        type: "boolean",
-                                        description: "Whether to include caller's own appointments",
-                                        default: true
-                                    }
-                                }
-                            }
                         }
                     ],
                     tool_choice: "auto",
@@ -1175,39 +1173,24 @@ export async function callAssistant(connection, req) {
 
     // Handle speech started event
     const handleSpeechStartedEvent = () => {
-    console.log('🎤 User started speaking - INTERRUPTING AI');
-    
-    // CRITICAL: Always clear Twilio audio immediately
-    if (streamSid && connection && connection.readyState === WebSocket.OPEN) {
-        connection.send(JSON.stringify({ 
-            event: 'clear', 
-            streamSid: streamSid 
-        }));
-    }
-    
-    // Cancel OpenAI response generation
-    if (openAiWs && openAiWs.readyState === WebSocket.OPEN) {
-        openAiWs.send(JSON.stringify({ 
-            type: 'response.cancel' 
-        }));
-    }
-    
-    // Try to truncate if possible
-    if (lastAssistantItem && responseStartTimestampTwilio) {
-        const elapsedTime = latestMediaTimestamp - responseStartTimestampTwilio;
-        openAiWs.send(JSON.stringify({
-            type: 'conversation.item.truncate',
-            item_id: lastAssistantItem,
-            content_index: 0,
-            audio_end_ms: elapsedTime
-        }));
-    }
-    
-    // Reset state
-    markQueue = [];
-    lastAssistantItem = null;
-    responseStartTimestampTwilio = null;
-};
+        if (markQueue.length > 0 && responseStartTimestampTwilio) {
+            const elapsedTime = latestMediaTimestamp - responseStartTimestampTwilio;
+            if (lastAssistantItem) {
+                const truncateEvent = {
+                    type: 'conversation.item.truncate',
+                    item_id: lastAssistantItem,
+                    content_index: 0,
+                    audio_end_ms: elapsedTime
+                };
+                openAiWs.send(JSON.stringify(truncateEvent));
+            }
+
+            connection.send(JSON.stringify({ event: 'clear', streamSid }));
+            markQueue = [];
+            lastAssistantItem = null;
+            responseStartTimestampTwilio = null;
+        }
+    };
 
     // Send mark to track audio chunks
     const sendMark = (connection, streamSid) => {
@@ -1244,6 +1227,68 @@ export async function callAssistant(connection, req) {
             let result = {};
 
             switch (functionName) {
+                case 'create_patient':
+                    console.log('Creating new patient in FHIR...');
+                    try {
+                        const newPatient = {
+                            resourceType: 'Patient',
+                            active: true,
+                            name: [{
+                                use: 'official',
+                                family: args.last_name || 'Not Provided',
+                                given: [args.first_name || '']
+                            }],
+                            telecom: [{
+                                system: 'phone',
+                                value: from || callContext?.from || '',
+                                use: 'mobile'
+                            }],
+                            gender: args.gender || 'unknown'
+                        };
+
+                        if (args.dob) {
+                            newPatient.birthDate = args.dob;
+                        } else if (args.age) {
+                            // Estimate birth year from age
+                            const currentYear = new Date().getFullYear();
+                            newPatient.birthDate = `${currentYear - args.age}-01-01`;
+                        }
+
+                        const createResult = await fhirService.createPatient(newPatient);
+
+                        if (createResult.success) {
+                            patientFhirId = createResult.fhirId;
+                            console.log(`✅ New patient created in FHIR: ${patientFhirId}`);
+
+                            // Update global context
+                            callContext.patientFhirId = patientFhirId;
+                            global.callContextMap.set(callContext.twilioCallSid, callContext);
+
+                            result = {
+                                success: true,
+                                fhirId: patientFhirId,
+                                message: `New patient ${args.first_name} created successfully`
+                            };
+
+                            // Load data right after creation
+                            const loadResult = await loadPatientData(patientFhirId);
+                            if (loadResult) {
+                                patientData = loadResult.patientData;
+                                upcomingAppointments = loadResult.upcomingAppointments;
+                            }
+                        } else {
+                            result = {
+                                success: false,
+                                message: 'Failed to create patient in FHIR',
+                                error: createResult.error
+                            };
+                        }
+                    } catch (error) {
+                        console.error('❌ Error creating patient:', error);
+                        result = { success: false, message: error.message };
+                    }
+                    break;
+
                 case 'end_call':
                     callEndingInProgress = true;
 
@@ -1291,56 +1336,6 @@ export async function callAssistant(connection, req) {
                     });
                     break;
 
-                // case 'book_appointment':
-                //     detectedIntent = 'book_appointment';
-
-                //     const hospitalContext = {
-                //         hospitalId: callContext?.hospital?._id || callContext?.hospital?.id || process.env.DEFAULT_HOSPITAL_ID
-                //     };
-
-                //     // Use stored patient data for returning patients
-                //     const appointmentData = {
-                //         patient_firstname: args.patient_firstname || patientData?.firstName,
-                //         patient_lastname: args.patient_lastname || patientData?.lastName,
-                //         patient_phone: args.patient_phone || patientData?.phone || from,
-                //         patient_dob: args.patient_dob || patientData?.dob,
-                //         patient_age: args.patient_age || patientData?.age,
-                //         doctor_name: args.doctor_name,
-                //         date: args.date,
-                //         time: args.time,
-                //         reason: args.reason,
-                //         doctorInfo: {
-                //             name: args.doctor_name,
-                //             specialty: args.specialty || 'General Practice'
-                //         },
-                //         hospitalContext
-                //     };
-
-                //     extractedEntities = { ...extractedEntities, ...appointmentData };
-                //     result = await bookAppointment(appointmentData);
-
-                //     // Refresh appointments after booking
-                //     if (result.success) {
-                //         // For EMR-only: use FHIR ID if available
-                //         const patientFhirIdToUpdate = result.patientFhirId || patientData?.fhirId;
-
-                //         if (patientFhirIdToUpdate) {
-                //             await updatePatientFromCall({
-                //                 patientFhirId: patientFhirIdToUpdate,
-                //                 doctor_name: appointmentData.doctor_name,
-                //                 date: appointmentData.date,
-                //                 time: appointmentData.time,
-                //                 reason: appointmentData.reason
-                //             });
-                //         }
-
-                //         // Refresh appointments from FHIR
-                //         if (patientFhirId) {
-                //             upcomingAppointments = await getUpcomingAppointments(patientFhirId);
-                //         }
-                //     }
-                //     break;
-
                 case 'book_appointment':
                     detectedIntent = 'book_appointment';
 
@@ -1348,72 +1343,23 @@ export async function callAssistant(connection, req) {
                         hospitalId: callContext?.hospital?._id || callContext?.hospital?.id || process.env.DEFAULT_HOSPITAL_ID
                     };
 
-                    // Determine the patient and caller based on booking_type
-                    let appointmentData;
-
-                    if (args.booking_type === 'self') {
-                        // For self-booking, use caller's information
-                        appointmentData = {
-                            booking_type: 'self',
-                            patient_firstname: args.patient_firstname || patientData?.firstName,
-                            patient_lastname: args.patient_lastname || patientData?.lastName,
-                            patient_phone: args.patient_phone || patientData?.phone || from,
-                            patient_dob: args.patient_dob || patientData?.dob,
-                            patient_age: args.patient_age || patientData?.age,
-                            doctor_name: args.doctor_name,
-                            date: args.date,
-                            time: args.time,
-                            reason: args.reason,
-                            doctorInfo: {
-                                name: args.doctor_name,
-                                specialty: args.specialty || 'General Practice'
-                            },
-                            hospitalContext
-                        };
-                    } else if (args.booking_type === 'family') {
-                        // For family booking, collect family member info separately
-                        appointmentData = {
-                            booking_type: 'family',
-                            patient_firstname: args.patient_firstname,  // Family member's name
-                            patient_lastname: args.patient_lastname,
-                            patient_phone: args.patient_phone,          // Family member's phone (may be same as caller)
-                            patient_dob: args.patient_dob,
-                            patient_age: args.patient_age,
-                            relationship: args.relationship,            // e.g., "son", "mother"
-                            caller_phone: from,                         // *** NEW: Caller's phone ***
-                            doctor_name: args.doctor_name,
-                            date: args.date,
-                            time: args.time,
-                            reason: args.reason,
-                            doctorInfo: {
-                                name: args.doctor_name,
-                                specialty: args.specialty || 'General Practice'
-                            },
-                            hospitalContext
-                        };
-                    } else if (args.booking_type === 'care_center') {
-                        // For care center bookings
-                        appointmentData = {
-                            booking_type: 'care_center',
-                            patient_firstname: args.patient_firstname,
-                            patient_lastname: args.patient_lastname,
-                            patient_phone: args.patient_phone,
-                            patient_dob: args.patient_dob,
-                            patient_age: args.patient_age,
-                            care_center_name: args.care_center_name,
-                            care_center_patient_id: args.care_center_patient_id,
-                            caller_phone: from,                         // *** NEW: Caller's phone ***
-                            doctor_name: args.doctor_name,
-                            date: args.date,
-                            time: args.time,
-                            reason: args.reason,
-                            doctorInfo: {
-                                name: args.doctor_name,
-                                specialty: args.specialty || 'General Practice'
-                            },
-                            hospitalContext
-                        };
-                    }
+                    // Use stored patient data for returning patients
+                    const appointmentData = {
+                        patient_firstname: args.patient_firstname || patientData?.firstName,
+                        patient_lastname: args.patient_lastname || patientData?.lastName,
+                        patient_phone: args.patient_phone || patientData?.phone || from,
+                        patient_dob: args.patient_dob || patientData?.dob,
+                        patient_age: args.patient_age || patientData?.age,
+                        doctor_name: args.doctor_name,
+                        date: args.date,
+                        time: args.time,
+                        reason: args.reason,
+                        doctorInfo: {
+                            name: args.doctor_name,
+                            specialty: args.specialty || 'General Practice'
+                        },
+                        hospitalContext
+                    };
 
                     extractedEntities = { ...extractedEntities, ...appointmentData };
                     result = await bookAppointment(appointmentData);
@@ -1424,9 +1370,9 @@ export async function callAssistant(connection, req) {
                         const patientFhirIdToUpdate = result.patientFhirId || patientData?.fhirId;
 
                         if (patientFhirIdToUpdate) {
-                            await updatePatientFromCall({
-                                patientFhirId: patientFhirIdToUpdate,
+                            await updatePatientFromCall(patientFhirIdToUpdate, {
                                 doctor_name: appointmentData.doctor_name,
+                                patient_name: appointmentData.patient_firstname,
                                 date: appointmentData.date,
                                 time: appointmentData.time,
                                 reason: appointmentData.reason
@@ -1628,14 +1574,6 @@ export async function callAssistant(connection, req) {
                             message: "I apologize, but I'm unable to transfer you right now. Let me try to help you with your question instead.",
                             error: result.error
                         };
-                    }
-                    break;
-
-                case 'get_family_appointments':
-                    result = await getFamilyAppointments(from);
-
-                    if (result.success && result.appointments.length > 0) {
-                        result.message = `You have ${result.appointments.length} upcoming appointment${result.appointments.length !== 1 ? 's' : ''} for your family members`;
                     }
                     break;
 
@@ -1904,7 +1842,7 @@ export async function callAssistant(connection, req) {
     function ulawToPcm16(ulawBuffer) {
         const pcm16Buffer = Buffer.alloc(ulawBuffer.length * 2);
 
-        // Î¼-law decompression table for faster lookup
+        // ÃŽÂ¼-law decompression table for faster lookup
         const ulawTable = [
             -32124, -31100, -30076, -29052, -28028, -27004, -25980, -24956,
             -23932, -22908, -21884, -20860, -19836, -18812, -17788, -16764,

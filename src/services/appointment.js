@@ -312,13 +312,44 @@ export const bookAppointment = async ({
         }
 
         // Step 2-3: Find practitioner and create appointment (existing code)
-        const doctorResult = await searchDoctorByName(doctor_name);
+        console.log(`🔍 Searching for doctor: "${doctor_name}"`);
 
+        // Strategy 1: Try original name first
+        let doctorResult = await searchDoctorByName(doctor_name);
+
+        // Strategy 2: If not found and name doesn't have "Dr.", try adding it
+        if ((!doctorResult.success || doctorResult.doctors.length === 0) &&
+            !doctor_name.toLowerCase().startsWith('dr')) {
+
+            console.log(`   ⚠️  Not found with "${doctor_name}". Trying "Dr. ${doctor_name}"...`);
+            doctorResult = await searchDoctorByName(`Dr. ${doctor_name}`);
+        }
+
+        // Strategy 3: If still not found, try just the last name
         if (!doctorResult.success || doctorResult.doctors.length === 0) {
-            return { success: false, message: 'Doctor not found' };
+            const nameParts = doctor_name.replace(/^dr\.?\s*/i, '').trim().split(/\s+/);
+            if (nameParts.length > 1) {
+                const lastName = nameParts[nameParts.length - 1];
+                console.log(`   ⚠️  Still not found. Trying last name: "${lastName}"`);
+                doctorResult = await searchDoctorByName(lastName);
+            }
+        }
+
+        // Final check: If still not found, return helpful error
+        if (!doctorResult.success || doctorResult.doctors.length === 0) {
+            console.log(`   ❌ Doctor not found after all attempts: "${doctor_name}"`);
+            return {
+                success: false,
+                message: `Doctor "${doctor_name}" not found. Please check the name or try: ${['Dr. Sarah Johnson', 'Dr. Michael Chen', 'Dr. Emily Rodriguez'].join(', ')
+                    }`
+            };
         }
 
         const practitionerId = doctorResult.doctors[0].id;
+        const actualDoctorName = doctorResult.doctors[0].name;
+        console.log(`   ✅ Found doctor: ${actualDoctorName} (ID: ${practitionerId})`);
+
+
         const startDateTime = new Date(`${date}T${time}:00`);
         const endDateTime = new Date(startDateTime.getTime() + 30 * 60000);
 

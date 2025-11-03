@@ -54,39 +54,16 @@ If no appointments: Offer to book one
 2. After collecting all details, system will automatically create the record
 3. Thank them and say: "Thank you! Your patient record has been created successfully. How can I assist you further today?"
 
-**APPOINTMENT BOOKING - COMPLETE FLOW:**
-When user wants to book an appointment, follow this EXACT sequence:
-
-1. FIRST - Ask who the appointment is for:
-   "Who would you like to book this appointment for?"
+**APPOINTMENT BOOKING:**
+When user wants to book an appointment:
+1. First ask: "Who would you like to book this appointment for?"
    - Yourself
    - A family member
-   - Someone in your care
-
-2. If booking for SELF, collect these details ONE BY ONE:
-   a) "Which doctor would you like to see?" (also ask for specialty if not mentioned)
-   b) "What date works best for you?" (format: YYYY-MM-DD or "tomorrow", "next Monday")
-   c) "What time would you prefer?" (morning/afternoon/evening or specific time)
-   d) "What is the reason for your visit?"
-   
-3. If booking for FAMILY MEMBER:
-   - Ask: "What is your relationship to them?"
-   - Ask: "Have they visited our practice before?"
-   - If YES: Ask for their phone number to look them up
-   - If NO: Collect their details (name, phone, age)
-   - Then collect appointment details (doctor, date, time, reason)
-
-4. AFTER collecting ALL details:
-   Confirm everything: "Let me confirm - You're booking an appointment with Dr. [Name] on [Date] at [Time] for [Reason]. Is that correct?"
-
-5. Upon confirmation:
-   Say: "Perfect! I'll call you now to finalize the booking and provide your confirmation number."
-
-CRITICAL RULES:
-- Ask questions ONE AT A TIME - don't overwhelm with multiple questions
-- ALWAYS collect: doctor, date, time, and reason before initiating call
-- Store all details in appointmentData before calling
-- Never initiate call without all 4 key details: doctor, date, time, reason
+   - Someone in your care (e.g., elderly parent, child)
+2. If booking for someone else:
+   - Ask for their details (name, age, relationship)
+   - Confirm the callback number (their number or patient's number)
+3. Then say: "I'll initiate a call right now to confirm the details and complete your appointment booking."
 
 **APPOINTMENT MANAGEMENT:**
 - **Scheduling/Booking**: Say "I'll call you now to complete your appointment booking."
@@ -104,14 +81,7 @@ CRITICAL RULES:
 - Services: Provide information about available medical services
 - Doctors: Share information about available doctors and specialties
 - Clinic timings: Provide accurate timing information
-- Available time slots: Explain that you don't have real-time slot access, but can collect their preference and the doctor's office will confirm availability during the call
 - General questions: Answer helpfully and professionally
-
-**HANDLING "CAN YOU TELL ME AVAILABLE SLOTS" QUESTIONS:**
-When patient asks about available slots/times:
-- Respond: "I don't have access to real-time slot availability, but I can collect your preferred time and our scheduling team will confirm the closest available slot when they call you. What time would work best for you?"
-- Continue with normal appointment booking flow
-- Don't stop the booking process - keep collecting preferences
 
 **CONVERSATION GUIDELINES:**
 - Always maintain a polite and empathetic tone
@@ -136,16 +106,16 @@ End gracefully: "You're most welcome! It was a pleasure assisting you today. Tak
 Remember: You represent Orion West Medical - be helpful, accurate, and caring in every interaction.`;
 
 /**
- * âœ… Check if we have all required patient information
+ * ✅ Check if we have all required patient information
  */
 function checkIfHasRequiredPatientInfo(patientData) {
     const required = ['firstName', 'lastName', 'phone', 'email', 'age', 'gender', 'dob'];
     const critical = ['firstName', 'lastName', 'phone', 'email'];
-
+    
     const missing = [];
     const present = [];
     const criticalMissing = [];
-
+    
     for (const field of required) {
         if (!patientData[field] || patientData[field].toString().trim() === '') {
             missing.push(field);
@@ -156,10 +126,10 @@ function checkIfHasRequiredPatientInfo(patientData) {
             present.push(field);
         }
     }
-
+    
     const canCreate = criticalMissing.length === 0;
     const complete = missing.length === 0;
-
+    
     return {
         complete: complete,
         canCreate: canCreate,
@@ -230,13 +200,7 @@ export const initializeChat = async (req, res) => {
                 patientName: null,
                 patientAge: null,
                 relationship: null,
-                callbackNumber: null,
-                doctor: null,
-                specialty: null,
-                date: null,
-                time: null,
-                reason: null,
-                collectionStage: null // Track what info we're collecting
+                callbackNumber: null
             },
             messages: [],
             context: context,
@@ -247,8 +211,7 @@ export const initializeChat = async (req, res) => {
             appointmentInfoShared: false,
             conversationEnding: false,
             updateMode: null,
-            pendingUpdate: null,
-            initialIntent: null // Store user's initial intent
+            pendingUpdate: null
         });
 
         const completion = await openai.chat.completions.create({
@@ -308,7 +271,7 @@ export const sendMessage = async (req, res) => {
         }
 
         const state = conversationStates.get(sessionId);
-
+        
         if (!state) {
             return res.status(404).json({
                 success: false,
@@ -319,53 +282,13 @@ export const sendMessage = async (req, res) => {
         state.lastActivity = new Date();
         const userMessage = message.trim();
 
-        console.log(`\nðŸ“© [${sessionId}] User: ${userMessage}`);
+        console.log(`\n📩 [${sessionId}] User: ${userMessage}`);
         console.log(`   Stage: ${state.stage}`);
 
-        // Detect initial intent from first user message (when stage is 'greeting')
-        if (state.stage === 'greeting') {
-            const lowerMessage = userMessage.toLowerCase();
-
-            // Detect appointment booking intent
-            if (lowerMessage.includes('book') || lowerMessage.includes('appointment') ||
-                lowerMessage.includes('schedule')) {
-                state.initialIntent = 'booking';
-                console.log('📌 Initial intent detected: booking');
-            }
-
-            // Update stage to awaiting_confirmation
-            state.stage = 'awaiting_confirmation';
-            conversationStates.set(sessionId, state);
-
-            state.messages.push({ role: "user", content: userMessage });
-
-            const completion = await openai.chat.completions.create({
-                model: "gpt-4o-mini",
-                messages: [
-                    ...state.messages,
-                    { role: "system", content: "User responded to greeting. Ask if they have visited the practice before." }
-                ],
-                temperature: 0.7,
-                max_tokens: 100
-            });
-
-            const aiMessage = completion.choices[0].message.content;
-            state.messages.push({ role: "assistant", content: aiMessage });
-            conversationStates.set(sessionId, state);
-
-            console.log(`🤖 Bot: ${aiMessage}`);
-
-            return res.json({
-                success: true,
-                message: aiMessage,
-                stage: state.stage
-            });
-        }
-
         // Handle "Yes" for returning patients
-        if (state.stage === 'awaiting_confirmation' &&
+        if (state.stage === 'awaiting_confirmation' && 
             (userMessage.toLowerCase() === 'yes' || userMessage.toLowerCase().includes('yes'))) {
-
+            
             state.stage = 'awaiting_phone';
             state.patientData.isReturning = true;
             conversationStates.set(sessionId, state);
@@ -386,7 +309,7 @@ export const sendMessage = async (req, res) => {
             state.messages.push({ role: "assistant", content: aiMessage });
             conversationStates.set(sessionId, state);
 
-            console.log(`ðŸ¤– Bot: ${aiMessage}`);
+            console.log(`🤖 Bot: ${aiMessage}`);
 
             return res.json({
                 success: true,
@@ -396,9 +319,9 @@ export const sendMessage = async (req, res) => {
         }
 
         // Handle "No" for new patients
-        if (state.stage === 'awaiting_confirmation' &&
+        if (state.stage === 'awaiting_confirmation' && 
             (userMessage.toLowerCase() === 'no' || userMessage.toLowerCase().includes('no'))) {
-
+            
             state.stage = 'new_patient_registration';
             state.patientData.isReturning = false;
             state.patientData.notFoundInSystem = true;
@@ -420,7 +343,7 @@ export const sendMessage = async (req, res) => {
             state.messages.push({ role: "assistant", content: aiMessage });
             conversationStates.set(sessionId, state);
 
-            console.log(`ðŸ¤– Bot: ${aiMessage}`);
+            console.log(`🤖 Bot: ${aiMessage}`);
 
             return res.json({
                 success: true,
@@ -431,14 +354,15 @@ export const sendMessage = async (req, res) => {
 
         // Handle phone number lookup for returning patients
         if (state.stage === 'awaiting_phone' && state.patientData.isReturning) {
-
-            console.log(`ðŸ” Searching FHIR for patient with phone: ${userMessage}`);
-
-            const searchResult = await fhirSearchService.findPatientByPhone(userMessage);
+            const phoneNumber = normalizePhoneNumber(userMessage);
+            
+            console.log(`🔍 Searching FHIR for patient with phone: ${phoneNumber}`);
+            
+            const searchResult = await fhirSearchService.findPatientByPhone(phoneNumber);
 
             if (searchResult.success) {
                 const patientInfo = fhirSearchService.extractPatientInfo(searchResult.patient);
-
+                
                 state.stage = 'patient_found';
                 state.patientData = {
                     ...state.patientData,
@@ -457,7 +381,7 @@ export const sendMessage = async (req, res) => {
                         email: patientInfo.email
                     }
                 };
-
+                
                 conversationStates.set(sessionId, state);
 
                 state.messages.push({ role: "user", content: userMessage });
@@ -466,9 +390,9 @@ export const sendMessage = async (req, res) => {
                     model: "gpt-4o-mini",
                     messages: [
                         ...state.messages,
-                        {
-                            role: "system",
-                            content: `Patient found in FHIR! Name: ${patientInfo.name}. Greet them warmly by name and ask how you can help them today.`
+                        { 
+                            role: "system", 
+                            content: `Patient found in FHIR! Name: ${patientInfo.name}. Greet them warmly by name and ask how you can help them today.` 
                         }
                     ],
                     temperature: 0.7,
@@ -479,8 +403,8 @@ export const sendMessage = async (req, res) => {
                 state.messages.push({ role: "assistant", content: aiMessage });
                 conversationStates.set(sessionId, state);
 
-                console.log(`âœ… Patient found: ${patientInfo.name}`);
-                console.log(`ðŸ¤– Bot: ${aiMessage}`);
+                console.log(`✅ Patient found: ${patientInfo.name}`);
+                console.log(`🤖 Bot: ${aiMessage}`);
 
                 return res.json({
                     success: true,
@@ -504,9 +428,9 @@ export const sendMessage = async (req, res) => {
                     model: "gpt-4o-mini",
                     messages: [
                         ...state.messages,
-                        {
-                            role: "system",
-                            content: "Phone number not found in FHIR. Politely inform patient and offer to create a new record. Ask for first name."
+                        { 
+                            role: "system", 
+                            content: "Phone number not found in FHIR. Politely inform patient and offer to create a new record. Ask for first name." 
                         }
                     ],
                     temperature: 0.7,
@@ -517,8 +441,8 @@ export const sendMessage = async (req, res) => {
                 state.messages.push({ role: "assistant", content: aiMessage });
                 conversationStates.set(sessionId, state);
 
-                console.log(`âŒ Patient not found. Starting registration.`);
-                console.log(`ðŸ¤– Bot: ${aiMessage}`);
+                console.log(`❌ Patient not found. Starting registration.`);
+                console.log(`🤖 Bot: ${aiMessage}`);
 
                 return res.json({
                     success: true,
@@ -531,24 +455,24 @@ export const sendMessage = async (req, res) => {
         // Handle patient data collection for new patients
         if (state.stage === 'new_patient_registration' && state.patientData.notFoundInSystem) {
             const extractedInfo = await extractPatientInfo(userMessage, state);
-
+            
             if (extractedInfo) {
                 state.patientData = { ...state.patientData, ...extractedInfo };
                 conversationStates.set(sessionId, state);
-
-                console.log(`âœ… Collected: ${JSON.stringify(extractedInfo)}`);
+                
+                console.log(`✅ Collected: ${JSON.stringify(extractedInfo)}`);
             }
 
             const infoCheck = checkIfHasRequiredPatientInfo(state.patientData);
-            console.log(`ðŸ“Š Registration ${infoCheck.percentComplete}% complete`);
+            console.log(`📊 Registration ${infoCheck.percentComplete}% complete`);
             console.log(`   Have: ${infoCheck.present.join(', ')}`);
             console.log(`   Need: ${infoCheck.missing.join(', ')}`);
 
             if (infoCheck.canCreate && !state.patientCreationAttempted) {
                 try {
                     const fhirPatient = convertToFHIRPatient(state.patientData);
-
-                    console.log('ðŸ”„ Creating patient in FHIR...');
+                    
+                    console.log('🔄 Creating patient in FHIR...');
                     const createResult = await fhirService.createPatient(fhirPatient);
 
                     if (createResult.success) {
@@ -559,7 +483,7 @@ export const sendMessage = async (req, res) => {
                         state.patientCreationAttempted = true;
                         conversationStates.set(sessionId, state);
 
-                        console.log(`âœ… Patient created in FHIR with ID: ${createResult.fhirId}`);
+                        console.log(`✅ Patient created in FHIR with ID: ${createResult.fhirId}`);
 
                         state.messages.push({ role: "user", content: userMessage });
 
@@ -567,9 +491,9 @@ export const sendMessage = async (req, res) => {
                             model: "gpt-4o-mini",
                             messages: [
                                 ...state.messages,
-                                {
-                                    role: "system",
-                                    content: "Patient record successfully created in FHIR. Thank them and ask how you can assist them further."
+                                { 
+                                    role: "system", 
+                                    content: "Patient record successfully created in FHIR. Thank them and ask how you can assist them further." 
                                 }
                             ],
                             temperature: 0.7,
@@ -580,7 +504,7 @@ export const sendMessage = async (req, res) => {
                         state.messages.push({ role: "assistant", content: aiMessage });
                         conversationStates.set(sessionId, state);
 
-                        console.log(`ðŸ¤– Bot: ${aiMessage}`);
+                        console.log(`🤖 Bot: ${aiMessage}`);
 
                         return res.json({
                             success: true,
@@ -593,17 +517,17 @@ export const sendMessage = async (req, res) => {
                         throw new Error(createResult.error || 'Failed to create patient in FHIR');
                     }
                 } catch (error) {
-                    console.error('âŒ Error creating patient in FHIR:', error);
-
+                    console.error('❌ Error creating patient in FHIR:', error);
+                    
                     state.messages.push({ role: "user", content: userMessage });
 
                     const completion = await openai.chat.completions.create({
                         model: "gpt-4o-mini",
                         messages: [
                             ...state.messages,
-                            {
-                                role: "system",
-                                content: "There was an error creating the patient record. Apologize and offer to have staff call them."
+                            { 
+                                role: "system", 
+                                content: "There was an error creating the patient record. Apologize and offer to have staff call them." 
                             }
                         ],
                         temperature: 0.7,
@@ -641,7 +565,7 @@ export const sendMessage = async (req, res) => {
             state.messages.push({ role: "assistant", content: aiMessage });
             conversationStates.set(sessionId, state);
 
-            console.log(`ðŸ¤– Bot: ${aiMessage}`);
+            console.log(`🤖 Bot: ${aiMessage}`);
 
             return res.json({
                 success: true,
@@ -654,15 +578,15 @@ export const sendMessage = async (req, res) => {
         // Handle appointment queries for existing patients
         if ((state.stage === 'patient_found' || state.stage === 'patient_created') && state.patientData.patientId) {
             const lowerMessage = userMessage.toLowerCase();
-
+            
             if ((lowerMessage.includes('appointment') && (lowerMessage.includes('my') || lowerMessage.includes('check'))) ||
-                lowerMessage.includes('when is my') ||
+                lowerMessage.includes('when is my') || 
                 lowerMessage.includes('do i have') ||
                 lowerMessage.includes('show me my')) {
-
+                
                 if (!state.appointmentInfoShared) {
-                    console.log(`ðŸ” Fetching appointments from FHIR for patient: ${state.patientData.patientId}`);
-
+                    console.log(`🔍 Fetching appointments from FHIR for patient: ${state.patientData.patientId}`);
+                    
                     const appointmentsResult = await fhirSearchService.findPatientAppointments(state.patientData.patientId);
 
                     let appointmentInfo = '';
@@ -676,20 +600,20 @@ export const sendMessage = async (req, res) => {
 
                         if (upcomingAppointments.length > 0) {
                             appointmentInfo = `Patient has ${upcomingAppointments.length} upcoming appointment(s):\n`;
-
+                            
                             upcomingAppointments.forEach((apt, index) => {
                                 const aptDate = new Date(apt.start);
-                                const formattedDate = aptDate.toLocaleDateString('en-US', {
-                                    weekday: 'long',
-                                    year: 'numeric',
-                                    month: 'long',
-                                    day: 'numeric'
+                                const formattedDate = aptDate.toLocaleDateString('en-US', { 
+                                    weekday: 'long', 
+                                    year: 'numeric', 
+                                    month: 'long', 
+                                    day: 'numeric' 
                                 });
-                                const formattedTime = aptDate.toLocaleTimeString('en-US', {
-                                    hour: '2-digit',
-                                    minute: '2-digit'
+                                const formattedTime = aptDate.toLocaleTimeString('en-US', { 
+                                    hour: '2-digit', 
+                                    minute: '2-digit' 
                                 });
-
+                                
                                 appointmentInfo += `${index + 1}. ${formattedDate} at ${formattedTime}\n`;
                                 appointmentInfo += `   Status: ${apt.status}\n`;
                                 if (apt.description) {
@@ -712,9 +636,9 @@ export const sendMessage = async (req, res) => {
                         model: "gpt-4o-mini",
                         messages: [
                             ...state.messages,
-                            {
-                                role: "system",
-                                content: `Appointment information from FHIR:\n${appointmentInfo}\n\nShare this with the patient in a friendly way. If no appointments, offer to book one.`
+                            { 
+                                role: "system", 
+                                content: `Appointment information from FHIR:\n${appointmentInfo}\n\nShare this with the patient in a friendly way. If no appointments, offer to book one.` 
                             }
                         ],
                         temperature: 0.7,
@@ -725,7 +649,7 @@ export const sendMessage = async (req, res) => {
                     state.messages.push({ role: "assistant", content: aiMessage });
                     conversationStates.set(sessionId, state);
 
-                    console.log(`ðŸ¤– Bot: ${aiMessage}`);
+                    console.log(`🤖 Bot: ${aiMessage}`);
 
                     return res.json({
                         success: true,
@@ -737,9 +661,9 @@ export const sendMessage = async (req, res) => {
             }
 
             // Handle appointment booking intent
-            if ((lowerMessage.includes('book') || lowerMessage.includes('schedule') ||
-                lowerMessage.includes('make an appointment')) && !state.callAttempted) {
-
+            if ((lowerMessage.includes('book') || lowerMessage.includes('schedule') || 
+                 lowerMessage.includes('make an appointment')) && !state.callAttempted) {
+                
                 state.stage = 'booking_appointment';
                 conversationStates.set(sessionId, state);
 
@@ -749,9 +673,9 @@ export const sendMessage = async (req, res) => {
                     model: "gpt-4o-mini",
                     messages: [
                         ...state.messages,
-                        {
-                            role: "system",
-                            content: "User wants to book appointment. Ask who the appointment is for: themselves, family member, or someone in their care."
+                        { 
+                            role: "system", 
+                            content: "User wants to book appointment. Ask who the appointment is for: themselves, family member, or someone in their care." 
                         }
                     ],
                     temperature: 0.7,
@@ -762,7 +686,7 @@ export const sendMessage = async (req, res) => {
                 state.messages.push({ role: "assistant", content: aiMessage });
                 conversationStates.set(sessionId, state);
 
-                console.log(`ðŸ¤– Bot: ${aiMessage}`);
+                console.log(`🤖 Bot: ${aiMessage}`);
 
                 return res.json({
                     success: true,
@@ -771,248 +695,36 @@ export const sendMessage = async (req, res) => {
                 });
             }
 
-        }
-        // Handle appointment booking details collection
-        if (state.stage === 'booking_appointment') {
-            const lowerMessage = userMessage.toLowerCase();
-
-            // Step 1: Determine who the appointment is for
-            if (!state.appointmentData.bookingFor) {
-                if (lowerMessage.includes('myself') || lowerMessage.includes('me') || lowerMessage === 'self' || lowerMessage === 'yes') {
-                    state.appointmentData.bookingFor = 'self';
-                    state.appointmentData.callbackNumber = state.patientData.phone;
-                    state.appointmentData.patientName = `${state.patientData.firstName} ${state.patientData.lastName}`;
-                    state.appointmentData.collectionStage = 'doctor';
-                } else if (lowerMessage.includes('family') || lowerMessage.includes('parent') ||
-                    lowerMessage.includes('child') || lowerMessage.includes('spouse') ||
-                    lowerMessage.includes('brother') || lowerMessage.includes('sister')) {
-                    state.appointmentData.bookingFor = 'other';
-                    state.appointmentData.relationship = userMessage;
-                    state.appointmentData.collectionStage = 'family_details';
-                }
-
-                if (state.appointmentData.bookingFor) {
-                    conversationStates.set(sessionId, state);
-
-                    state.messages.push({ role: "user", content: userMessage });
-
-                    let systemMessage = '';
-                    if (state.appointmentData.bookingFor === 'self') {
-                        systemMessage = "User is booking for themselves. Now ask which doctor they would like to see.";
-                    } else {
-                        systemMessage = "User is booking for family member. Ask if the family member has visited before.";
+            // Handle appointment booking details collection
+            if (state.stage === 'booking_appointment') {
+                if (!state.appointmentData.bookingFor) {
+                    if (lowerMessage.includes('myself') || lowerMessage.includes('me') || lowerMessage === 'self') {
+                        state.appointmentData.bookingFor = 'self';
+                        state.appointmentData.callbackNumber = state.patientData.phone;
+                    } else if (lowerMessage.includes('family') || lowerMessage.includes('parent') || 
+                               lowerMessage.includes('child') || lowerMessage.includes('spouse')) {
+                        state.appointmentData.bookingFor = 'other';
+                        state.appointmentData.relationship = userMessage;
                     }
-
-                    const completion = await openai.chat.completions.create({
-                        model: "gpt-4o-mini",
-                        messages: [
-                            ...state.messages,
-                            { role: "system", content: systemMessage }
-                        ],
-                        temperature: 0.7,
-                        max_tokens: 100
-                    });
-
-                    const aiMessage = completion.choices[0].message.content;
-                    state.messages.push({ role: "assistant", content: aiMessage });
                     conversationStates.set(sessionId, state);
-
-                    console.log(`🤖 Bot: ${aiMessage}`);
-
-                    return res.json({
-                        success: true,
-                        message: aiMessage,
-                        stage: state.stage
-                    });
-                }
-            }
-
-            // Step 2: For SELF bookings, collect appointment details sequentially
-            if (state.appointmentData.bookingFor === 'self' && !state.callAttempted) {
-                // Collect doctor
-                if (state.appointmentData.collectionStage === 'doctor' && !state.appointmentData.doctor) {
-                    state.appointmentData.doctor = userMessage;
-                    state.appointmentData.collectionStage = 'date';
-                    conversationStates.set(sessionId, state);
-
-                    state.messages.push({ role: "user", content: userMessage });
-
-                    const completion = await openai.chat.completions.create({
-                        model: "gpt-4o-mini",
-                        messages: [
-                            ...state.messages,
-                            { role: "system", content: `Doctor selected: ${userMessage}. Now ask what date they prefer for the appointment.` }
-                        ],
-                        temperature: 0.7,
-                        max_tokens: 100
-                    });
-
-                    const aiMessage = completion.choices[0].message.content;
-                    state.messages.push({ role: "assistant", content: aiMessage });
-                    conversationStates.set(sessionId, state);
-
-                    console.log(`✅ Doctor: ${userMessage}`);
-                    console.log(`🤖 Bot: ${aiMessage}`);
-
-                    return res.json({
-                        success: true,
-                        message: aiMessage,
-                        stage: state.stage
-                    });
                 }
 
-                // Collect date
-                if (state.appointmentData.collectionStage === 'date' && !state.appointmentData.date) {
-                    state.appointmentData.date = userMessage;
-                    state.appointmentData.collectionStage = 'time';
-                    conversationStates.set(sessionId, state);
+                if (state.appointmentData.bookingFor === 'self' && !state.callAttempted) {
+                    const hospitalId = process.env.DEFAULT_HOSPITAL_ID || null;
+                    
+                    try {
+                        const callResult = await initiateCall(
+                            state.patientData.phone, 
+                            state.patientData, 
+                            state.appointmentData, 
+                            hospitalId,
+                            sessionId
+                        );
 
-                    state.messages.push({ role: "user", content: userMessage });
-
-                    const completion = await openai.chat.completions.create({
-                        model: "gpt-4o-mini",
-                        messages: [
-                            ...state.messages,
-                            { role: "system", content: `Date selected: ${userMessage}. Now ask what time they prefer (morning/afternoon/evening or specific time).` }
-                        ],
-                        temperature: 0.7,
-                        max_tokens: 100
-                    });
-
-                    const aiMessage = completion.choices[0].message.content;
-                    state.messages.push({ role: "assistant", content: aiMessage });
-                    conversationStates.set(sessionId, state);
-
-                    console.log(`✅ Date: ${userMessage}`);
-                    console.log(`🤖 Bot: ${aiMessage}`);
-
-                    return res.json({
-                        success: true,
-                        message: aiMessage,
-                        stage: state.stage
-                    });
-                }
-
-                // Collect time
-                if (state.appointmentData.collectionStage === 'time' && !state.appointmentData.time) {
-                    state.appointmentData.time = userMessage;
-                    state.appointmentData.collectionStage = 'reason';
-                    conversationStates.set(sessionId, state);
-
-                    state.messages.push({ role: "user", content: userMessage });
-
-                    const completion = await openai.chat.completions.create({
-                        model: "gpt-4o-mini",
-                        messages: [
-                            ...state.messages,
-                            { role: "system", content: `Time selected: ${userMessage}. Now ask for the reason for their visit.` }
-                        ],
-                        temperature: 0.7,
-                        max_tokens: 100
-                    });
-
-                    const aiMessage = completion.choices[0].message.content;
-                    state.messages.push({ role: "assistant", content: aiMessage });
-                    conversationStates.set(sessionId, state);
-
-                    console.log(`✅ Time: ${userMessage}`);
-                    console.log(`🤖 Bot: ${aiMessage}`);
-
-                    return res.json({
-                        success: true,
-                        message: aiMessage,
-                        stage: state.stage
-                    });
-                }
-
-                // Collect reason
-                if (state.appointmentData.collectionStage === 'reason' && !state.appointmentData.reason) {
-                    state.appointmentData.reason = userMessage;
-                    state.appointmentData.collectionStage = 'confirm';
-                    conversationStates.set(sessionId, state);
-
-                    state.messages.push({ role: "user", content: userMessage });
-
-                    const summary = `Doctor: ${state.appointmentData.doctor}, Date: ${state.appointmentData.date}, Time: ${state.appointmentData.time}, Reason: ${state.appointmentData.reason}`;
-
-                    const completion = await openai.chat.completions.create({
-                        model: "gpt-4o-mini",
-                        messages: [
-                            ...state.messages,
-                            { role: "system", content: `Reason collected: ${userMessage}. All details collected: ${summary}. Now confirm all details with the patient and ask if everything is correct.` }
-                        ],
-                        temperature: 0.7,
-                        max_tokens: 150
-                    });
-
-                    const aiMessage = completion.choices[0].message.content;
-                    state.messages.push({ role: "assistant", content: aiMessage });
-                    conversationStates.set(sessionId, state);
-
-                    console.log(`✅ Reason: ${userMessage}`);
-                    console.log(`📋 All details collected`);
-                    console.log(`🤖 Bot: ${aiMessage}`);
-
-                    return res.json({
-                        success: true,
-                        message: aiMessage,
-                        stage: state.stage,
-                        appointmentDetails: state.appointmentData
-                    });
-                }
-
-                // Final confirmation and initiate call
-                if (state.appointmentData.collectionStage === 'confirm' && !state.callAttempted) {
-                    if (lowerMessage.includes('yes') || lowerMessage.includes('correct') ||
-                        lowerMessage.includes('confirm') || lowerMessage.includes('right')) {
-                        const hospitalId = process.env.DEFAULT_HOSPITAL_ID || null;
-
-                        try {
-                            const callResult = await initiateCall(
-                                state.patientData.phone,
-                                state.patientData,
-                                state.appointmentData,
-                                hospitalId,
-                                sessionId
-                            );
-
-                            if (callResult.success) {
-                                state.callAttempted = true;
-                                state.callSid = callResult.callSid;
-                                conversationStates.set(sessionId, state);
-
-                                state.messages.push({ role: "user", content: userMessage });
-
-                                const completion = await openai.chat.completions.create({
-                                    model: "gpt-4o-mini",
-                                    messages: [
-                                        ...state.messages,
-                                        {
-                                            role: "system",
-                                            content: "Call initiated successfully. Inform the patient that you're calling them now to complete the booking."
-                                        }
-                                    ],
-                                    temperature: 0.7,
-                                    max_tokens: 100
-                                });
-
-                                const aiMessage = completion.choices[0].message.content;
-                                state.messages.push({ role: "assistant", content: aiMessage });
-                                conversationStates.set(sessionId, state);
-
-                                console.log(`📞 Call initiated: ${callResult.callSid}`);
-                                console.log(`🤖 Bot: ${aiMessage}`);
-
-                                return res.json({
-                                    success: true,
-                                    message: aiMessage,
-                                    stage: state.stage,
-                                    callInitiated: true,
-                                    callSid: callResult.callSid
-                                });
-                            }
-                        } catch (error) {
-                            console.error('❌ Error initiating call:', error);
+                        if (callResult.success) {
+                            state.callAttempted = true;
+                            state.callSid = callResult.callSid;
+                            conversationStates.set(sessionId, state);
 
                             state.messages.push({ role: "user", content: userMessage });
 
@@ -1020,9 +732,9 @@ export const sendMessage = async (req, res) => {
                                 model: "gpt-4o-mini",
                                 messages: [
                                     ...state.messages,
-                                    {
-                                        role: "system",
-                                        content: "Call initiation failed. Apologize and ask if they'd like to try again or have staff call them back."
+                                    { 
+                                        role: "system", 
+                                        content: "Call initiated successfully. Inform the patient that you're calling them now to complete the booking." 
                                     }
                                 ],
                                 temperature: 0.7,
@@ -1033,19 +745,208 @@ export const sendMessage = async (req, res) => {
                             state.messages.push({ role: "assistant", content: aiMessage });
                             conversationStates.set(sessionId, state);
 
+                            console.log(`📞 Call initiated: ${callResult.callSid}`);
+                            console.log(`🤖 Bot: ${aiMessage}`);
+
                             return res.json({
                                 success: true,
                                 message: aiMessage,
                                 stage: state.stage,
-                                error: 'Call initiation failed'
+                                callInitiated: true,
+                                callSid: callResult.callSid
                             });
                         }
+                    } catch (error) {
+                        console.error('❌ Error initiating call:', error);
+                    }
+                }
+
+                if (state.appointmentData.bookingFor === 'other') {
+                    state.messages.push({ role: "user", content: userMessage });
+
+                    const completion = await openai.chat.completions.create({
+                        model: "gpt-4o-mini",
+                        messages: [
+                            ...state.messages,
+                            { 
+                                role: "system", 
+                                content: `Booking for ${state.appointmentData.relationship}. Ask for name and age, then initiate call.` 
+                            }
+                        ],
+                        temperature: 0.7,
+                        max_tokens: 150
+                    });
+
+                    const aiMessage = completion.choices[0].message.content;
+                    state.messages.push({ role: "assistant", content: aiMessage });
+                    conversationStates.set(sessionId, state);
+
+                    console.log(`🤖 Bot: ${aiMessage}`);
+
+                    return res.json({
+                        success: true,
+                        message: aiMessage,
+                        stage: state.stage
+                    });
+                }
+            }
+
+            // Handle update patient information
+            if (lowerMessage.includes('update') || lowerMessage.includes('change') || lowerMessage.includes('modify')) {
+                state.updateMode = true;
+                conversationStates.set(sessionId, state);
+
+                state.messages.push({ role: "user", content: userMessage });
+
+                const completion = await openai.chat.completions.create({
+                    model: "gpt-4o-mini",
+                    messages: [
+                        ...state.messages,
+                        { 
+                            role: "system", 
+                            content: "User wants to update their information. Ask which information they want to change (email, phone, address, etc.)." 
+                        }
+                    ],
+                    temperature: 0.7,
+                    max_tokens: 150
+                });
+
+                const aiMessage = completion.choices[0].message.content;
+                state.messages.push({ role: "assistant", content: aiMessage });
+                conversationStates.set(sessionId, state);
+
+                console.log(`🤖 Bot: ${aiMessage}`);
+
+                return res.json({
+                    success: true,
+                    message: aiMessage,
+                    stage: state.stage
+                });
+            }
+
+            if (state.updateMode && state.patientData.fhirId) {
+                let fieldToUpdate = null;
+                let newValue = null;
+
+                if (lowerMessage.includes('email')) {
+                    fieldToUpdate = 'email';
+                    const emailMatch = userMessage.match(/[\w.-]+@[\w.-]+\.\w+/);
+                    if (emailMatch) {
+                        newValue = emailMatch[0];
+                    }
+                } else if (lowerMessage.includes('phone')) {
+                    fieldToUpdate = 'phone';
+                    newValue = normalizePhoneNumber(userMessage);
+                }
+
+                if (fieldToUpdate && newValue) {
+                    try {
+                        // Get current patient data from FHIR
+                        const patientResult = await fhirService.getPatient(state.patientData.fhirId);
+                        
+                        if (patientResult.success) {
+                            const fhirPatient = patientResult.data;
+
+                            // Update the appropriate field
+                            if (fieldToUpdate === 'email') {
+                                const emailIndex = fhirPatient.telecom.findIndex(t => t.system === 'email');
+                                if (emailIndex >= 0) {
+                                    fhirPatient.telecom[emailIndex].value = newValue;
+                                } else {
+                                    fhirPatient.telecom.push({
+                                        system: 'email',
+                                        value: newValue
+                                    });
+                                }
+                                state.patientData.email = newValue;
+                            } else if (fieldToUpdate === 'phone') {
+                                const phoneIndex = fhirPatient.telecom.findIndex(t => t.system === 'phone');
+                                if (phoneIndex >= 0) {
+                                    fhirPatient.telecom[phoneIndex].value = newValue;
+                                } else {
+                                    fhirPatient.telecom.push({
+                                        system: 'phone',
+                                        value: newValue,
+                                        use: 'mobile'
+                                    });
+                                }
+                                state.patientData.phone = newValue;
+                            }
+
+                            // Update in FHIR
+                            const updateResult = await fhirService.updatePatient(state.patientData.fhirId, fhirPatient);
+
+                            if (updateResult.success) {
+                                state.updateMode = false;
+                                conversationStates.set(sessionId, state);
+
+                                console.log(`✅ Updated ${fieldToUpdate} in FHIR to: ${newValue}`);
+
+                                state.messages.push({ role: "user", content: userMessage });
+
+                                const completion = await openai.chat.completions.create({
+                                    model: "gpt-4o-mini",
+                                    messages: [
+                                        ...state.messages,
+                                        { 
+                                            role: "system", 
+                                            content: `Successfully updated ${fieldToUpdate} to ${newValue} in FHIR. Confirm the update to the patient.` 
+                                        }
+                                    ],
+                                    temperature: 0.7,
+                                    max_tokens: 150
+                                });
+
+                                const aiMessage = completion.choices[0].message.content;
+                                state.messages.push({ role: "assistant", content: aiMessage });
+                                conversationStates.set(sessionId, state);
+
+                                console.log(`🤖 Bot: ${aiMessage}`);
+
+                                return res.json({
+                                    success: true,
+                                    message: aiMessage,
+                                    stage: state.stage,
+                                    updated: true,
+                                    field: fieldToUpdate
+                                });
+                            }
+                        }
+                    } catch (error) {
+                        console.error('❌ Error updating patient in FHIR:', error);
                     }
                 }
             }
         }
-    }
-    catch (error) {
+
+        // Default: General conversation
+        state.messages.push({ role: "user", content: userMessage });
+
+        const contextMessage = buildContextMessage(state);
+
+        const completion = await openai.chat.completions.create({
+            model: "gpt-4o-mini",
+            messages: [
+                ...state.messages,
+                { role: "system", content: contextMessage }
+            ],
+            temperature: 0.7,
+            max_tokens: 200
+        });
+
+        const aiMessage = completion.choices[0].message.content;
+        state.messages.push({ role: "assistant", content: aiMessage });
+        conversationStates.set(sessionId, state);
+
+        console.log(`🤖 Bot: ${aiMessage}`);
+
+        res.json({
+            success: true,
+            message: aiMessage,
+            stage: state.stage
+        });
+
+    } catch (error) {
         console.error('Error processing message:', error);
         res.status(500).json({
             success: false,
@@ -1056,8 +957,8 @@ export const sendMessage = async (req, res) => {
 };
 
 async function initiateCall(phoneNumber, patientData, appointmentData, hospitalId, sessionId) {
-    console.log(`ðŸ“ž Initiating call to: ${phoneNumber}`);
-
+    console.log(`📞 Initiating call to: ${phoneNumber}`);
+    
     const metadata = {
         sessionId,
         source: 'chatbot',
@@ -1065,13 +966,13 @@ async function initiateCall(phoneNumber, patientData, appointmentData, hospitalI
         relationship: appointmentData.relationship,
         patientName: appointmentData.patientName
     };
-
+    
     const result = await callService.makeOutboundCall({
         phoneNumber,
         patientId: patientData.patientId || null,
         hospitalId,
-        reason: appointmentData.bookingFor === 'self'
-            ? 'Appointment booking'
+        reason: appointmentData.bookingFor === 'self' 
+            ? 'Appointment booking' 
             : `Appointment booking for ${appointmentData.relationship}`,
         callType: 'general',
         metadata
@@ -1087,7 +988,7 @@ async function extractPatientInfo(message, state) {
     try {
         const missingFields = checkIfHasRequiredPatientInfo(state.patientData).missing;
         const lastBotMessage = state.messages[state.messages.length - 1]?.content || '';
-
+        
         let expectedField = null;
         if (lastBotMessage.toLowerCase().includes('first name')) {
             expectedField = 'firstName';
@@ -1104,24 +1005,24 @@ async function extractPatientInfo(message, state) {
         } else if (lastBotMessage.toLowerCase().includes('date of birth') || lastBotMessage.toLowerCase().includes('dob')) {
             expectedField = 'dob';
         }
-
-        console.log(`ðŸ” Extracting patient info. Expected field: ${expectedField}, Missing: ${missingFields.join(', ')}`);
-
+        
+        console.log(`🔍 Extracting patient info. Expected field: ${expectedField}, Missing: ${missingFields.join(', ')}`);
+        
         if (expectedField && missingFields.includes(expectedField)) {
             const extracted = {};
             extracted[expectedField] = message.trim();
-
-            console.log(`âœ… Direct extraction: ${expectedField} = "${message.trim()}"`);
+            
+            console.log(`✅ Direct extraction: ${expectedField} = "${message.trim()}"`);
             return extracted;
         }
-
+        
         const completion = await openai.chat.completions.create({
             model: "gpt-4o-mini",
             messages: [
                 { role: "system", content: "Extract information and return only valid JSON. Map the user's response to the correct field based on context." },
-                {
-                    role: "user",
-                    content: `Context: We just asked "${lastBotMessage}". Missing fields: ${missingFields.join(', ')}. User responded: "${message}". Extract patient info. Return JSON with appropriate field: firstName, lastName, phone, email, age, dob, or gender.`
+                { 
+                    role: "user", 
+                    content: `Context: We just asked "${lastBotMessage}". Missing fields: ${missingFields.join(', ')}. User responded: "${message}". Extract patient info. Return JSON with appropriate field: firstName, lastName, phone, email, age, dob, or gender.` 
                 }
             ],
             temperature: 0.3,
@@ -1134,14 +1035,14 @@ async function extractPatientInfo(message, state) {
         if (jsonMatch) {
             const extracted = JSON.parse(jsonMatch[0]);
             const newData = {};
-
+            
             for (const [key, value] of Object.entries(extracted)) {
                 if (value && value !== "" && !state.patientData[key]) {
                     newData[key] = value;
                 }
             }
-
-            console.log(`âœ… AI extraction:`, newData);
+            
+            console.log(`✅ AI extraction:`, newData);
             return Object.keys(newData).length > 0 ? newData : null;
         }
         return null;
@@ -1193,7 +1094,7 @@ async function gatherContextualInformation(req) {
 }
 
 function logChatInitialization(sessionId, context) {
-    console.log(`âœ… Chat initialized: ${sessionId} at ${context.timeOfDay}`);
+    console.log(`✅ Chat initialized: ${sessionId} at ${context.timeOfDay}`);
 }
 
 export const getChatAnalytics = async (req, res) => {
@@ -1205,9 +1106,9 @@ export const getConversationHistory = async (req, res) => {
     const { sessionId } = req.params;
     const state = conversationStates.get(sessionId);
     if (!state) return res.status(404).json({ success: false });
-    res.json({
-        success: true,
-        messages: state.messages,
+    res.json({ 
+        success: true, 
+        messages: state.messages, 
         patientData: state.patientData,
         appointmentData: state.appointmentData
     });
@@ -1219,9 +1120,9 @@ export const getConversationHistory = async (req, res) => {
 export const updateConversationCallStatus = async (sessionId, statusData) => {
     try {
         const { callSid, callStatus, callDuration, timestamp } = statusData;
-
+        
         const state = conversationStates.get(sessionId);
-
+        
         if (!state) {
             console.warn(`No conversation state found for session: ${sessionId}`);
             return { success: false, error: 'Session not found' };
@@ -1255,10 +1156,10 @@ export const updateConversationCallStatus = async (sessionId, statusData) => {
     }
 };
 
-export default {
-    initializeChat,
-    sendMessage,
-    getConversationHistory,
-    getChatAnalytics,
-    updateConversationCallStatus
+export default { 
+    initializeChat, 
+    sendMessage, 
+    getConversationHistory, 
+    getChatAnalytics, 
+    updateConversationCallStatus 
 };

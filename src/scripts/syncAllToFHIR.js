@@ -867,248 +867,248 @@
 // addSlotsTomorrow();
 
 
-import fhirService from '../services/fhirService.js';
-import 'dotenv/config';
-const PATIENT_ID = '51526060';
+// import fhirService from '../services/fhirService.js';
+// import 'dotenv/config';
+// const PATIENT_ID = '51526630';
 
-async function deletePatientTargeted() {
-    console.log('🎯 TARGETED PATIENT DELETION\n');
-    console.log(`Patient ID: ${PATIENT_ID}`);
-    console.log('Focusing on Communication resources that are blocking deletion\n');
-    console.log('Press Ctrl+C within 3 seconds to cancel...\n');
+// async function deletePatientTargeted() {
+//     console.log('🎯 TARGETED PATIENT DELETION\n');
+//     console.log(`Patient ID: ${PATIENT_ID}`);
+//     console.log('Focusing on Communication resources that are blocking deletion\n');
+//     console.log('Press Ctrl+C within 3 seconds to cancel...\n');
 
-    await new Promise(resolve => setTimeout(resolve, 3000));
+//     await new Promise(resolve => setTimeout(resolve, 3000));
 
-    const stats = {
-        communicationsDeleted: 0,
-        communicationsFailed: 0,
-        otherResourcesDeleted: 0,
-        patientDeleted: false
-    };
+//     const stats = {
+//         communicationsDeleted: 0,
+//         communicationsFailed: 0,
+//         otherResourcesDeleted: 0,
+//         patientDeleted: false
+//     };
 
-    const patientReference = `Patient/${PATIENT_ID}`;
+//     const patientReference = `Patient/${PATIENT_ID}`;
 
-    try {
-        // ========================================
-        // 1. GET PATIENT INFO
-        // ========================================
-        console.log('📋 Step 1: Verifying patient...\n');
-        const patientResult = await fhirService.getPatient(PATIENT_ID);
+//     try {
+//         // ========================================
+//         // 1. GET PATIENT INFO
+//         // ========================================
+//         console.log('📋 Step 1: Verifying patient...\n');
+//         const patientResult = await fhirService.getPatient(PATIENT_ID);
         
-        if (!patientResult.success) {
-            console.log(`❌ Patient ${PATIENT_ID} not found!`);
-            return;
-        }
+//         if (!patientResult.success) {
+//             console.log(`❌ Patient ${PATIENT_ID} not found!`);
+//             return;
+//         }
 
-        const patient = patientResult.data;
-        const patientName = patient.name?.[0];
-        const fullName = patientName ? 
-            `${patientName.given?.join(' ') || ''} ${patientName.family || ''}`.trim() : 
-            'Unknown';
+//         const patient = patientResult.data;
+//         const patientName = patient.name?.[0];
+//         const fullName = patientName ? 
+//             `${patientName.given?.join(' ') || ''} ${patientName.family || ''}`.trim() : 
+//             'Unknown';
         
-        console.log(`✅ Patient: ${fullName}\n`);
+//         console.log(`✅ Patient: ${fullName}\n`);
 
-        // ========================================
-        // 2. DELETE ALL COMMUNICATIONS
-        // ========================================
-        console.log('📋 Step 2: Finding and deleting ALL Communications...\n');
+//         // ========================================
+//         // 2. DELETE ALL COMMUNICATIONS
+//         // ========================================
+//         console.log('📋 Step 2: Finding and deleting ALL Communications...\n');
         
-        // Search using multiple parameters to catch all Communications
-        const communicationSearches = [
-            { param: 'subject', value: patientReference, desc: 'subject' },
-            { param: 'patient', value: patientReference, desc: 'patient' },
-            { param: 'sender', value: patientReference, desc: 'sender' },
-            { param: 'recipient', value: patientReference, desc: 'recipient' }
-        ];
+//         // Search using multiple parameters to catch all Communications
+//         const communicationSearches = [
+//             { param: 'subject', value: patientReference, desc: 'subject' },
+//             { param: 'patient', value: patientReference, desc: 'patient' },
+//             { param: 'sender', value: patientReference, desc: 'sender' },
+//             { param: 'recipient', value: patientReference, desc: 'recipient' }
+//         ];
 
-        const allCommunications = new Map(); // To avoid duplicates
+//         const allCommunications = new Map(); // To avoid duplicates
 
-        for (const search of communicationSearches) {
-            console.log(`🔍 Searching Communications by ${search.desc}...`);
+//         for (const search of communicationSearches) {
+//             console.log(`🔍 Searching Communications by ${search.desc}...`);
             
-            try {
-                const searchParams = {};
-                searchParams[search.param] = search.value;
+//             try {
+//                 const searchParams = {};
+//                 searchParams[search.param] = search.value;
                 
-                const result = await fhirService.searchCommunications(searchParams);
+//                 const result = await fhirService.searchCommunications(searchParams);
 
-                if (result.success && result.entries && result.entries.length > 0) {
-                    console.log(`   Found ${result.entries.length} Communication(s)`);
+//                 if (result.success && result.entries && result.entries.length > 0) {
+//                     console.log(`   Found ${result.entries.length} Communication(s)`);
                     
-                    result.entries.forEach(entry => {
-                        const commId = entry.resource.id;
-                        if (!allCommunications.has(commId)) {
-                            allCommunications.set(commId, entry.resource);
-                        }
-                    });
-                } else {
-                    console.log(`   No Communications found`);
-                }
-            } catch (error) {
-                console.log(`   ⚠️  Search error: ${error.message}`);
-            }
-        }
+//                     result.entries.forEach(entry => {
+//                         const commId = entry.resource.id;
+//                         if (!allCommunications.has(commId)) {
+//                             allCommunications.set(commId, entry.resource);
+//                         }
+//                     });
+//                 } else {
+//                     console.log(`   No Communications found`);
+//                 }
+//             } catch (error) {
+//                 console.log(`   ⚠️  Search error: ${error.message}`);
+//             }
+//         }
 
-        console.log(`\n📊 Total unique Communications found: ${allCommunications.size}\n`);
+//         console.log(`\n📊 Total unique Communications found: ${allCommunications.size}\n`);
 
-        if (allCommunications.size > 0) {
-            console.log('🗑️  Deleting Communications...\n');
+//         if (allCommunications.size > 0) {
+//             console.log('🗑️  Deleting Communications...\n');
             
-            let count = 0;
-            for (const [commId, comm] of allCommunications) {
-                count++;
-                const category = comm.category?.[0]?.coding?.[0]?.display || 'Unknown';
-                const status = comm.status || 'unknown';
+//             let count = 0;
+//             for (const [commId, comm] of allCommunications) {
+//                 count++;
+//                 const category = comm.category?.[0]?.coding?.[0]?.display || 'Unknown';
+//                 const status = comm.status || 'unknown';
                 
-                console.log(`   [${count}/${allCommunications.size}] Deleting Communication/${commId}`);
-                console.log(`       Type: ${category}, Status: ${status}`);
+//                 console.log(`   [${count}/${allCommunications.size}] Deleting Communication/${commId}`);
+//                 console.log(`       Type: ${category}, Status: ${status}`);
                 
-                try {
-                    const result = await fhirService.deleteCommunication(commId);
-                    if (result.success) {
-                        stats.communicationsDeleted++;
-                        console.log(`       ✅ Deleted\n`);
-                    } else {
-                        stats.communicationsFailed++;
-                        console.log(`       ❌ Failed: ${result.error}\n`);
-                    }
-                } catch (error) {
-                    stats.communicationsFailed++;
-                    console.log(`       ❌ Failed: ${error.message}\n`);
-                }
-            }
+//                 try {
+//                     const result = await fhirService.deleteCommunication(commId);
+//                     if (result.success) {
+//                         stats.communicationsDeleted++;
+//                         console.log(`       ✅ Deleted\n`);
+//                     } else {
+//                         stats.communicationsFailed++;
+//                         console.log(`       ❌ Failed: ${result.error}\n`);
+//                     }
+//                 } catch (error) {
+//                     stats.communicationsFailed++;
+//                     console.log(`       ❌ Failed: ${error.message}\n`);
+//                 }
+//             }
             
-            console.log(`✅ Deleted ${stats.communicationsDeleted} Communication(s)`);
-            if (stats.communicationsFailed > 0) {
-                console.log(`⚠️  Failed to delete ${stats.communicationsFailed} Communication(s)\n`);
-            }
-        }
+//             console.log(`✅ Deleted ${stats.communicationsDeleted} Communication(s)`);
+//             if (stats.communicationsFailed > 0) {
+//                 console.log(`⚠️  Failed to delete ${stats.communicationsFailed} Communication(s)\n`);
+//             }
+//         }
 
-        // ========================================
-        // 3. DELETE OTHER RESOURCES
-        // ========================================
-        console.log('\n📋 Step 3: Checking for other resources...\n');
+//         // ========================================
+//         // 3. DELETE OTHER RESOURCES
+//         // ========================================
+//         console.log('\n📋 Step 3: Checking for other resources...\n');
 
-        const otherResources = [
-            { type: 'Appointment', param: 'patient' },
-            { type: 'Encounter', param: 'subject' },
-            { type: 'MedicationRequest', param: 'subject' },
-            { type: 'Observation', param: 'subject' },
-            { type: 'DiagnosticReport', param: 'subject' },
-            { type: 'AllergyIntolerance', param: 'patient' },
-            { type: 'Condition', param: 'subject' },
-            { type: 'Procedure', param: 'subject' },
-            { type: 'CarePlan', param: 'subject' },
-            { type: 'Immunization', param: 'patient' },
-            { type: 'RelatedPerson', param: 'patient' }
-        ];
+//         const otherResources = [
+//             { type: 'Appointment', param: 'patient' },
+//             { type: 'Encounter', param: 'subject' },
+//             { type: 'MedicationRequest', param: 'subject' },
+//             { type: 'Observation', param: 'subject' },
+//             { type: 'DiagnosticReport', param: 'subject' },
+//             { type: 'AllergyIntolerance', param: 'patient' },
+//             { type: 'Condition', param: 'subject' },
+//             { type: 'Procedure', param: 'subject' },
+//             { type: 'CarePlan', param: 'subject' },
+//             { type: 'Immunization', param: 'patient' },
+//             { type: 'RelatedPerson', param: 'patient' }
+//         ];
 
-        for (const resource of otherResources) {
-            try {
-                const searchParams = {};
-                searchParams[resource.param] = patientReference;
+//         for (const resource of otherResources) {
+//             try {
+//                 const searchParams = {};
+//                 searchParams[resource.param] = patientReference;
                 
-                const result = await fhirService.searchResources(resource.type, searchParams);
+//                 const result = await fhirService.searchResources(resource.type, searchParams);
 
-                if (result.success && result.entries && result.entries.length > 0) {
-                    console.log(`🗑️  Found ${result.entries.length} ${resource.type}(s), deleting...`);
+//                 if (result.success && result.entries && result.entries.length > 0) {
+//                     console.log(`🗑️  Found ${result.entries.length} ${resource.type}(s), deleting...`);
                     
-                    for (const entry of result.entries) {
-                        const resourceId = entry.resource.id;
-                        try {
-                            await fhirService.axios.delete(`/${resource.type}/${resourceId}`);
-                            stats.otherResourcesDeleted++;
-                            console.log(`   ✅ Deleted ${resource.type}/${resourceId}`);
-                        } catch (error) {
-                            console.log(`   ❌ Failed to delete ${resource.type}/${resourceId}`);
-                        }
-                    }
-                }
-            } catch (error) {
-                // Resource type not found or search failed
-            }
-        }
+//                     for (const entry of result.entries) {
+//                         const resourceId = entry.resource.id;
+//                         try {
+//                             await fhirService.axios.delete(`/${resource.type}/${resourceId}`);
+//                             stats.otherResourcesDeleted++;
+//                             console.log(`   ✅ Deleted ${resource.type}/${resourceId}`);
+//                         } catch (error) {
+//                             console.log(`   ❌ Failed to delete ${resource.type}/${resourceId}`);
+//                         }
+//                     }
+//                 }
+//             } catch (error) {
+//                 // Resource type not found or search failed
+//             }
+//         }
 
-        if (stats.otherResourcesDeleted > 0) {
-            console.log(`\n✅ Deleted ${stats.otherResourcesDeleted} other resource(s)\n`);
-        } else {
-            console.log(`✅ No other resources found\n`);
-        }
+//         if (stats.otherResourcesDeleted > 0) {
+//             console.log(`\n✅ Deleted ${stats.otherResourcesDeleted} other resource(s)\n`);
+//         } else {
+//             console.log(`✅ No other resources found\n`);
+//         }
 
-        // ========================================
-        // 4. ATTEMPT PATIENT DELETION
-        // ========================================
-        console.log('📋 Step 4: Attempting patient deletion...\n');
-        console.log(`🗑️  Deleting Patient/${PATIENT_ID} (${fullName})`);
+//         // ========================================
+//         // 4. ATTEMPT PATIENT DELETION
+//         // ========================================
+//         console.log('📋 Step 4: Attempting patient deletion...\n');
+//         console.log(`🗑️  Deleting Patient/${PATIENT_ID} (${fullName})`);
         
-        try {
-            await fhirService.axios.delete(`/Patient/${PATIENT_ID}`);
-            stats.patientDeleted = true;
-            console.log(`   ✅ Patient deleted successfully!\n`);
-        } catch (error) {
-            const errorMsg = error.response?.data?.issue?.[0]?.diagnostics || error.message;
-            console.log(`   ❌ Failed: ${errorMsg}\n`);
+//         try {
+//             await fhirService.axios.delete(`/Patient/${PATIENT_ID}`);
+//             stats.patientDeleted = true;
+//             console.log(`   ✅ Patient deleted successfully!\n`);
+//         } catch (error) {
+//             const errorMsg = error.response?.data?.issue?.[0]?.diagnostics || error.message;
+//             console.log(`   ❌ Failed: ${errorMsg}\n`);
             
-            // If still failing, show which resources are still blocking
-            if (errorMsg.includes('reference')) {
-                console.log('   🔍 Checking for remaining references...\n');
+//             // If still failing, show which resources are still blocking
+//             if (errorMsg.includes('reference')) {
+//                 console.log('   🔍 Checking for remaining references...\n');
                 
-                // Extract resource type from error message
-                const match = errorMsg.match(/resource (\w+)\/(\d+)/);
-                if (match) {
-                    const blockingType = match[1];
-                    const blockingId = match[2];
-                    console.log(`   ⚠️  Blocking resource: ${blockingType}/${blockingId}`);
+//                 // Extract resource type from error message
+//                 const match = errorMsg.match(/resource (\w+)\/(\d+)/);
+//                 if (match) {
+//                     const blockingType = match[1];
+//                     const blockingId = match[2];
+//                     console.log(`   ⚠️  Blocking resource: ${blockingType}/${blockingId}`);
                     
-                    // Try to get details about the blocking resource
-                    try {
-                        const blockingResource = await fhirService.axios.get(`/${blockingType}/${blockingId}`);
-                        console.log(`   📄 Resource details:`);
-                        console.log(JSON.stringify(blockingResource.data, null, 2));
-                    } catch (e) {
-                        console.log(`   ⚠️  Could not retrieve blocking resource details`);
-                    }
-                }
-            }
-        }
+//                     // Try to get details about the blocking resource
+//                     try {
+//                         const blockingResource = await fhirService.axios.get(`/${blockingType}/${blockingId}`);
+//                         console.log(`   📄 Resource details:`);
+//                         console.log(JSON.stringify(blockingResource.data, null, 2));
+//                     } catch (e) {
+//                         console.log(`   ⚠️  Could not retrieve blocking resource details`);
+//                     }
+//                 }
+//             }
+//         }
 
-        // ========================================
-        // 5. FINAL VERIFICATION
-        // ========================================
-        console.log('\n' + '='.repeat(70));
-        console.log('📊 DELETION SUMMARY');
-        console.log('='.repeat(70));
-        console.log(`Patient: ${fullName} (ID: ${PATIENT_ID})\n`);
-        console.log(`✅ Communications deleted:    ${stats.communicationsDeleted}`);
-        if (stats.communicationsFailed > 0) {
-            console.log(`❌ Communications failed:     ${stats.communicationsFailed}`);
-        }
-        console.log(`✅ Other resources deleted:   ${stats.otherResourcesDeleted}`);
-        console.log(`${stats.patientDeleted ? '✅' : '❌'} Patient deleted:          ${stats.patientDeleted ? 'YES' : 'NO'}`);
-        console.log('='.repeat(70));
+//         // ========================================
+//         // 5. FINAL VERIFICATION
+//         // ========================================
+//         console.log('\n' + '='.repeat(70));
+//         console.log('📊 DELETION SUMMARY');
+//         console.log('='.repeat(70));
+//         console.log(`Patient: ${fullName} (ID: ${PATIENT_ID})\n`);
+//         console.log(`✅ Communications deleted:    ${stats.communicationsDeleted}`);
+//         if (stats.communicationsFailed > 0) {
+//             console.log(`❌ Communications failed:     ${stats.communicationsFailed}`);
+//         }
+//         console.log(`✅ Other resources deleted:   ${stats.otherResourcesDeleted}`);
+//         console.log(`${stats.patientDeleted ? '✅' : '❌'} Patient deleted:          ${stats.patientDeleted ? 'YES' : 'NO'}`);
+//         console.log('='.repeat(70));
 
-        console.log('\n🔍 Final Verification...\n');
+//         console.log('\n🔍 Final Verification...\n');
 
-        const verifyResult = await fhirService.getPatient(PATIENT_ID);
-        if (!verifyResult.success) {
-            console.log(`✅✅✅ SUCCESS! Patient ${PATIENT_ID} has been completely deleted! ✅✅✅\n`);
-        } else {
-            console.log(`⚠️  Patient ${PATIENT_ID} still exists\n`);
+//         const verifyResult = await fhirService.getPatient(PATIENT_ID);
+//         if (!verifyResult.success) {
+//             console.log(`✅✅✅ SUCCESS! Patient ${PATIENT_ID} has been completely deleted! ✅✅✅\n`);
+//         } else {
+//             console.log(`⚠️  Patient ${PATIENT_ID} still exists\n`);
             
-            // Do one final check for Communications
-            const finalCommCheck = await fhirService.searchCommunications({ subject: patientReference });
-            if (finalCommCheck.success && finalCommCheck.entries && finalCommCheck.entries.length > 0) {
-                console.log(`⚠️  WARNING: ${finalCommCheck.entries.length} Communication(s) still exist!`);
-                console.log(`   This might be due to server-side caching or indexing delays.`);
-                console.log(`   Try running the script again in a few seconds.\n`);
-            }
-        }
+//             // Do one final check for Communications
+//             const finalCommCheck = await fhirService.searchCommunications({ subject: patientReference });
+//             if (finalCommCheck.success && finalCommCheck.entries && finalCommCheck.entries.length > 0) {
+//                 console.log(`⚠️  WARNING: ${finalCommCheck.entries.length} Communication(s) still exist!`);
+//                 console.log(`   This might be due to server-side caching or indexing delays.`);
+//                 console.log(`   Try running the script again in a few seconds.\n`);
+//             }
+//         }
 
-    } catch (error) {
-        console.error('\n❌ CRITICAL ERROR:', error.message);
-        console.error(error.stack);
-    }
-}
+//     } catch (error) {
+//         console.error('\n❌ CRITICAL ERROR:', error.message);
+//         console.error(error.stack);
+//     }
+// }
 
-// Run the targeted deletion
-deletePatientTargeted();
+// // Run the targeted deletion
+// deletePatientTargeted();

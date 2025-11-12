@@ -170,7 +170,12 @@ export const inboundCall = async (req, res) => {
             patientName: patientData?.firstName || 'Patient',
             hospital: hospitalData,
             contextKey: contextKey,
-            timestamp: Date.now()
+            timestamp: Date.now(),
+
+            nameVerificationPending: true,
+            callerIdentityVerified: false,
+            callerContext: null,
+            bookingMode: null
         };
 
         // Store context by multiple keys for lookup flexibility

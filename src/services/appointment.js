@@ -414,90 +414,256 @@ export const bookAppointment = async ({
 export const rescheduleAppointmentByDetails = async (rescheduleData) => {
     try {
         const {
-            patient_name,
+            patient_phone,
+            original_doctor,
+            original_date,
+            original_time,
+            new_date,
+            new_time,
+            reason
+        } = rescheduleData;
+
+        console.log('📋 Reschedule request:', {
             patient_phone,
             original_doctor,
             original_date,
             original_time,
             new_date,
             new_time
-        } = rescheduleData;
+        });
+
+        if (!patient_phone || !original_doctor || !original_date || !original_time || !new_date || !new_time) {
+            return {
+                success: false,
+                message: 'Missing required information for rescheduling'
+            };
+        }
 
         // Find patient
         const patientResult = await searchPatientByPhone(patient_phone);
 
-        if (!patientResult.success || patientResult.total === 0) {
+        if (!patientResult.success) {
             return {
                 success: false,
-                message: `Patient "${patient_name}" not found. Please verify the name and phone number.`
+                message: `I couldn't find a patient with phone number ${patient_phone}.`
             };
         }
 
         const patientId = patientResult.entries[0].resource.id;
+        console.log(`✅ Found patient: ${patientId}`);
 
-        // Find doctor
-        const doctorResult = await searchDoctorByName(original_doctor);
+        // ✅ FIX 1: IMPROVED DOCTOR SEARCH
+        const normalizedInput = original_doctor.toLowerCase()
+            .replace(/^dr\.?\s*/i, '')
+            .trim();
+
+        console.log(`🔍 Searching for doctor: "${original_doctor}"`);
+        console.log(`📋 Normalized name: "${normalizedInput}"`);
+
+        let doctorResult = await searchDoctorByName(original_doctor);
+
+        // Try with "Dr." prefix
+        if (!doctorResult.success || doctorResult.doctors.length === 0) {
+            console.log(`⚠️ No results for "${original_doctor}", trying with "Dr." prefix...`);
+            doctorResult = await searchDoctorByName(`Dr. ${normalizedInput}`);
+        }
+
+        // Try without "Dr." prefix (normalized)
+        if (!doctorResult.success || doctorResult.doctors.length === 0) {
+            console.log(`⚠️ No results with "Dr.", trying normalized name: "${normalizedInput}"`);
+            doctorResult = await searchDoctorByName(normalizedInput);
+        }
+
+        // Try last name only
+        if (!doctorResult.success || doctorResult.doctors.length === 0) {
+            console.log(`⚠️ No exact match, trying partial match with last name...`);
+            const nameParts = normalizedInput.split(/\s+/);
+            if (nameParts.length > 1) {
+                const lastName = nameParts[nameParts.length - 1];
+                console.log(`🔍 Searching by last name: "${lastName}"`);
+                doctorResult = await searchDoctorByName(lastName);
+            }
+        }
+
+        // Try first name only (last resort)
+        if (!doctorResult.success || doctorResult.doctors.length === 0) {
+            console.log(`⚠️ Trying first name only...`);
+            const nameParts = normalizedInput.split(/\s+/);
+            if (nameParts.length > 0) {
+                const firstName = nameParts[0];
+                console.log(`🔍 Searching by first name: "${firstName}"`);
+                doctorResult = await searchDoctorByName(firstName);
+            }
+        }
 
         if (!doctorResult.success || doctorResult.doctors.length === 0) {
             return {
                 success: false,
-                message: `Doctor "${original_doctor}" not found. Please verify the doctor's name.`
+                message: `I couldn't find Dr. ${original_doctor}. Please verify the spelling or try saying just the last name.`
             };
         }
 
         const practitionerId = doctorResult.doctors[0].id;
+        const doctorName = doctorResult.doctors[0].name;
+        console.log(`✅ Found doctor: ${doctorName} (${practitionerId})`);
 
-        // Search for the original appointment
-        const originalDateTime = new Date(`${original_date}T${original_time}:00`);
+        // Parse original date and time
+        const [year, month, day] = original_date.split('-');
+        const [hours, minutes] = original_time.split(':');
 
-        const searchResult = await fhirService.searchAppointments({
-            patient: patientId,
-            practitioner: practitionerId,
-            date: originalDateTime.toISOString().split('T')[0]
-        });
+        const originalDateTime = new Date(
+            parseInt(year),
+            parseInt(month) - 1,
+            parseInt(day),
+            parseInt(hours),
+            parseInt(minutes),
+            0
+        );
 
-        if (!searchResult.success || searchResult.total === 0) {
+        if (isNaN(originalDateTime.getTime())) {
             return {
                 success: false,
-                message: `No appointment found for ${patient_name} with ${original_doctor} on ${original_date} at ${original_time}`
+                message: `Invalid original date/time: ${original_date} ${original_time}`
             };
         }
 
-        // Get the appointment to reschedule
-        const appointment = searchResult.entries[0].resource;
-        const appointmentId = appointment.id;
+        console.log(`📅 Looking for appointment on: ${originalDateTime.toLocaleString()}`);
 
-        // Update appointment with new date/time
-        const newStartDateTime = new Date(`${new_date}T${new_time}:00`);
+        // ✅ FIX 2: CORRECTED FHIR DATE QUERY
+        // OPTION A: Use simple date format (FHIR searches whole day)
+        const searchResult = await fhirService.searchAppointments({
+            patient: patientId,
+            practitioner: practitionerId,
+            date: original_date,  // ✅ Simple format: "2025-11-13"
+            status: 'booked,confirmed'
+        });
+
+        /* ✅ OPTION B: If Option A doesn't work, use this:
+        const searchResult = await fhirService.searchAppointments({
+            patient: patientId,
+            practitioner: practitionerId,
+            status: 'booked,confirmed',
+            _filter: `date ge ${original_date}T00:00:00Z and date le ${original_date}T23:59:59Z`
+        });
+        */
+
+        if (!searchResult.success || searchResult.total === 0) {
+            console.log('❌ No appointments found');
+            return {
+                success: false,
+                message: `No appointment found with ${doctorName} on ${original_date} at ${original_time}`
+            };
+        }
+
+        console.log(`✅ Found ${searchResult.total} appointment(s) on ${original_date}`);
+
+        // Find appointment matching the exact time
+        let matchingAppointment = null;
+
+        for (const entry of searchResult.entries) {
+            const apt = entry.resource;
+            const aptStart = new Date(apt.start);
+            const aptHours = aptStart.getHours();
+            const aptMinutes = aptStart.getMinutes();
+
+            console.log(`   Checking appointment at ${aptHours}:${aptMinutes}`);
+
+            if (aptHours === parseInt(hours) && aptMinutes === parseInt(minutes)) {
+                matchingAppointment = apt;
+                console.log(`   ✅ Exact time match found!`);
+                break;
+            }
+        }
+
+        if (!matchingAppointment) {
+            // If no exact time match, use the first appointment
+            matchingAppointment = searchResult.entries[0].resource;
+            const aptStart = new Date(matchingAppointment.start);
+            console.log(`⚠️ No exact time match, using appointment at ${aptStart.toLocaleTimeString()}`);
+        }
+
+        const appointmentId = matchingAppointment.id;
+        console.log(`✅ Using appointment: ${appointmentId}`);
+
+        // Parse new date and time
+        const [newYear, newMonth, newDay] = new_date.split('-');
+        const [newHours, newMinutes] = new_time.split(':');
+
+        const newStartDateTime = new Date(
+            parseInt(newYear),
+            parseInt(newMonth) - 1,
+            parseInt(newDay),
+            parseInt(newHours),
+            parseInt(newMinutes),
+            0
+        );
+
+        if (isNaN(newStartDateTime.getTime())) {
+            return {
+                success: false,
+                message: `Invalid new date/time: ${new_date} ${new_time}`
+            };
+        }
+
         const newEndDateTime = new Date(newStartDateTime.getTime() + 30 * 60000);
 
-        appointment.start = newStartDateTime.toISOString();
-        appointment.end = newEndDateTime.toISOString();
-        appointment.status = 'booked';
+        // Update appointment
+        matchingAppointment.start = newStartDateTime.toISOString();
+        matchingAppointment.end = newEndDateTime.toISOString();
+        matchingAppointment.status = 'booked';
 
-        const updateResult = await fhirService.updateAppointment(appointmentId, appointment);
+        // Add comment
+        if (!matchingAppointment.comment) {
+            matchingAppointment.comment = [];
+        }
+        matchingAppointment.comment.push({
+            text: `Rescheduled on ${new Date().toISOString()}: ${reason || 'No reason provided'}`,
+            time: new Date().toISOString()
+        });
+
+        const updateResult = await fhirService.updateAppointment(appointmentId, matchingAppointment);
 
         if (updateResult.success) {
+            const oldDateFormatted = originalDateTime.toLocaleDateString('en-US', {
+                weekday: 'long',
+                year: 'numeric',
+                month: 'long',
+                day: 'numeric'
+            });
+
+            const newDateFormatted = newStartDateTime.toLocaleDateString('en-US', {
+                weekday: 'long',
+                year: 'numeric',
+                month: 'long',
+                day: 'numeric'
+            });
+
+            console.log(`✅ Appointment rescheduled successfully!`);
+
             return {
                 success: true,
-                message: `Appointment rescheduled to ${new_date} at ${new_time}`,
+                message: `Appointment successfully rescheduled!\n\nOld: ${oldDateFormatted} at ${original_time}\nNew: ${newDateFormatted} at ${new_time}`,
                 appointmentId: appointmentId,
+                oldDate: original_date,
+                oldTime: original_time,
                 newDate: new_date,
                 newTime: new_time,
+                confirmationNumber: `APT-${appointmentId.slice(-6).toUpperCase()}`,
                 data: updateResult.data
             };
         } else {
             return {
                 success: false,
-                message: 'Failed to reschedule appointment',
+                message: 'Failed to reschedule the appointment.',
                 error: updateResult.error
             };
         }
+
     } catch (error) {
-        console.error('Error rescheduling appointment:', error);
+        console.error('❌ Error rescheduling appointment:', error);
         return {
             success: false,
-            message: 'Error rescheduling appointment',
+            message: 'An error occurred while rescheduling.',
             error: error.message
         };
     }
@@ -595,64 +761,185 @@ export const cancelAppointment = async (appointmentId) => {
  */
 export const cancelAppointmentByDetails = async (cancelData) => {
     try {
-        const { patient_phone, doctor_name, date, time } = cancelData;
+        const {
+            patient_phone,
+            doctor_name,
+            date,
+            reason
+        } = cancelData;
+
+        console.log('📋 Cancel request:', {
+            patient_phone,
+            doctor_name,
+            date,
+            reason
+        });
+
+        if (!patient_phone || !date) {
+            return {
+                success: false,
+                message: 'Missing required information for cancellation'
+            };
+        }
 
         // Find patient
         const patientResult = await searchPatientByPhone(patient_phone);
 
-        if (!patientResult.success || patientResult.total === 0) {
+        if (!patientResult.success) {
             return {
                 success: false,
-                message: 'Patient not found'
+                message: `I couldn't find a patient with phone number ${patient_phone}.`
             };
         }
 
         const patientId = patientResult.entries[0].resource.id;
+        console.log(`✅ Found patient: ${patientId}`);
 
-        // Find doctor if provided
+        // Build search parameters
+        const searchParams = {
+            patient: patientId,
+            date: date,
+            status: 'booked,confirmed'
+        };
+
+        // ✅ IMPROVED DOCTOR SEARCH (if doctor_name is provided)
         let practitionerId = null;
+        let doctorFullName = null;
+
         if (doctor_name) {
-            const doctorResult = await searchDoctorByName(doctor_name);
+            const normalizedInput = doctor_name.toLowerCase()
+                .replace(/^dr\.?\s*/i, '')
+                .trim();
+
+            console.log(`🔍 Searching for doctor: "${doctor_name}"`);
+            console.log(`📋 Normalized name: "${normalizedInput}"`);
+
+            let doctorResult = await searchDoctorByName(doctor_name);
+
+            // Try with "Dr." prefix
+            if (!doctorResult.success || doctorResult.doctors.length === 0) {
+                console.log(`⚠️ No results for "${doctor_name}", trying with "Dr." prefix...`);
+                doctorResult = await searchDoctorByName(`Dr. ${normalizedInput}`);
+            }
+
+            // Try without "Dr." prefix (normalized)
+            if (!doctorResult.success || doctorResult.doctors.length === 0) {
+                console.log(`⚠️ No results with "Dr.", trying normalized name: "${normalizedInput}"`);
+                doctorResult = await searchDoctorByName(normalizedInput);
+            }
+
+            // Try last name only
+            if (!doctorResult.success || doctorResult.doctors.length === 0) {
+                console.log(`⚠️ No exact match, trying partial match with last name...`);
+                const nameParts = normalizedInput.split(/\s+/);
+                if (nameParts.length > 1) {
+                    const lastName = nameParts[nameParts.length - 1];
+                    console.log(`🔍 Searching by last name: "${lastName}"`);
+                    doctorResult = await searchDoctorByName(lastName);
+                }
+            }
+
+            // Try first name only (last resort)
+            if (!doctorResult.success || doctorResult.doctors.length === 0) {
+                console.log(`⚠️ Trying first name only...`);
+                const nameParts = normalizedInput.split(/\s+/);
+                if (nameParts.length > 0) {
+                    const firstName = nameParts[0];
+                    console.log(`🔍 Searching by first name: "${firstName}"`);
+                    doctorResult = await searchDoctorByName(firstName);
+                }
+            }
 
             if (!doctorResult.success || doctorResult.doctors.length === 0) {
                 return {
                     success: false,
-                    message: 'Doctor not found'
+                    message: `I couldn't find Dr. ${doctor_name}. Please verify the spelling or try saying just the last name.`
                 };
             }
+
             practitionerId = doctorResult.doctors[0].id;
-        }
-
-        // Search for the appointment
-        const searchParams = { patient: patientId };
-
-        if (practitionerId) {
+            doctorFullName = doctorResult.doctors[0].name;
             searchParams.practitioner = practitionerId;
+            console.log(`✅ Found doctor: ${doctorFullName} (${practitionerId})`);
         }
 
-        if (date) {
-            const appointmentDateTime = new Date(`${date}T${time || '00:00'}:00`);
-            searchParams.date = appointmentDateTime.toISOString().split('T')[0];
-        }
+        console.log(`📅 Looking for appointment(s) on: ${date}`);
 
+        // ✅ CORRECTED FHIR DATE QUERY
         const searchResult = await fhirService.searchAppointments(searchParams);
 
         if (!searchResult.success || searchResult.total === 0) {
+            console.log('❌ No appointments found');
+            const doctorMsg = doctorFullName ? ` with ${doctorFullName}` : '';
             return {
                 success: false,
-                message: 'No matching appointment found'
+                message: `No appointment found${doctorMsg} on ${date}`
             };
         }
 
-        // Cancel the appointment
-        const appointment = searchResult.entries[0].resource;
-        return await cancelAppointment(appointment.id);
+        console.log(`✅ Found ${searchResult.total} appointment(s) on ${date}`);
+
+        // If multiple appointments found, use the first one
+        const matchingAppointment = searchResult.entries[0].resource;
+        const appointmentId = matchingAppointment.id;
+        const aptStart = new Date(matchingAppointment.start);
+
+        console.log(`✅ Using appointment: ${appointmentId} at ${aptStart.toLocaleTimeString()}`);
+
+        // Update appointment status to cancelled
+        matchingAppointment.status = 'cancelled';
+
+        // Add cancellation comment
+        if (!matchingAppointment.comment) {
+            matchingAppointment.comment = [];
+        }
+        matchingAppointment.comment.push({
+            text: `Cancelled on ${new Date().toISOString()}: ${reason || 'No reason provided'}`,
+            time: new Date().toISOString()
+        });
+
+        const updateResult = await fhirService.updateAppointment(appointmentId, matchingAppointment);
+
+        if (updateResult.success) {
+            const dateFormatted = aptStart.toLocaleDateString('en-US', {
+                weekday: 'long',
+                year: 'numeric',
+                month: 'long',
+                day: 'numeric'
+            });
+
+            const timeFormatted = aptStart.toLocaleTimeString('en-US', {
+                hour: '2-digit',
+                minute: '2-digit'
+            });
+
+            const doctorMsg = doctorFullName ? ` with ${doctorFullName}` : '';
+
+            console.log(`✅ Appointment cancelled successfully!`);
+
+            return {
+                success: true,
+                message: `Appointment successfully cancelled!\n\n${dateFormatted} at ${timeFormatted}${doctorMsg}`,
+                appointmentId: appointmentId,
+                date: date,
+                time: timeFormatted,
+                doctor: doctorFullName,
+                confirmationNumber: `CANC-${appointmentId.slice(-6).toUpperCase()}`,
+                data: updateResult.data
+            };
+        } else {
+            return {
+                success: false,
+                message: 'Failed to cancel the appointment.',
+                error: updateResult.error
+            };
+        }
 
     } catch (error) {
-        console.error('Error cancelling appointment by details:', error);
+        console.error('❌ Error cancelling appointment:', error);
         return {
             success: false,
-            message: 'Error cancelling appointment',
+            message: 'An error occurred while cancelling.',
             error: error.message
         };
     }

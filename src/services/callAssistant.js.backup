@@ -14,7 +14,6 @@ import {
 import { processPrescriptionRefill } from './prescriptionRefill.js';
 import { loadPatientData, bookAppointment, findPatientAppointments, cancelAppointmentByDetails, rescheduleAppointmentByDetails } from "./appointment.js";
 import { AudioBufferManager, transcribeAudio } from "./transcription.js";
-import { linkRelatedPerson } from "./relatedPerson.js";
 
 function getInstructions(callContext, patientData, appointmentData) {
     const hospitalName = callContext.hospital?.name || 'City General Hospital';
@@ -27,17 +26,21 @@ function getInstructions(callContext, patientData, appointmentData) {
     if (patientData) {
         patientContext = `
             PATIENT CONTEXT:
-            - Patient Name: ${patientData.firstName} ${patientData.lastName}
+            - Patient Name: ${patientData.firstName}
             - Phone: ${patientData.phone}
             - Previous visits: ${patientData.totalVisits}
             ${patientData.preferredDoctor ? `- Preferred Doctor: ${patientData.preferredDoctor}` : ''}
             ${patientData.age ? `- Age: ${patientData.age}` : ''}
             ${patientData.gender ? `- Gender: ${patientData.gender}` : ''}
-            ${patientData.dob ? `- DOB: ${patientData.dob}` : ''}`;
+            ${patientData.dob ? `- dob: ${patientData.dob}` : ''}`
+
+
+
     }
 
     let appointmentContext = "";
     if (callContext.type === 'outbound' && callContext.callType === 'follow_up') {
+        // For follow-up calls, show PAST appointment info
         if (appointmentData && appointmentData.pastAppointment) {
             appointmentContext = `
                 RECENT APPOINTMENT (FOLLOW-UP CONTEXT):
@@ -48,6 +51,7 @@ function getInstructions(callContext, patientData, appointmentData) {
                 - Status: ${appointmentData.pastAppointment.status}`;
         }
 
+        // Also include upcoming appointments if any
         if (appointmentData && appointmentData.upcomingAppointments && appointmentData.upcomingAppointments.length > 0) {
             appointmentContext += `
 
@@ -57,6 +61,7 @@ function getInstructions(callContext, patientData, appointmentData) {
             ).join('\n')}`;
         }
     } else if (callContext.type === 'outbound' && callContext.callType === 'appointment_reminder') {
+        // For reminder calls, show the specific appointment being reminded about
         if (callContext.reminderData) {
             appointmentContext = `
                 APPOINTMENT REMINDER DETAILS:
@@ -67,6 +72,7 @@ function getInstructions(callContext, patientData, appointmentData) {
                 - Confirmation: ${callContext.reminderData.confirmationNumber}`;
         }
     } else {
+        // For inbound calls or other outbound calls, show upcoming appointments
         if (appointmentData && appointmentData.upcomingAppointments && appointmentData.upcomingAppointments.length > 0) {
             appointmentContext = `
                 UPCOMING APPOINTMENTS:
@@ -80,246 +86,140 @@ function getInstructions(callContext, patientData, appointmentData) {
         }
     }
 
+    // Different instructions based on call type
     let roleAndGreeting = "";
     let specificInstructions = "";
 
     if (callContext.type === 'outbound') {
-        // Outbound call logic (keep existing)
+        // Outbound call specific behavior
         switch (callContext.callType) {
             case 'appointment_reminder':
-                roleAndGreeting = `You are a Virtual assistant calling from ${hospitalName} for an OUTBOUND appointment reminder.
+                roleAndGreeting = `You are an Virtual assistant calling from ${hospitalName} for an OUTBOUND appointment reminder. The patient should be expecting this call or may not be. Be professional and clear about why you're calling.
 
                 GREETING: "Hello, This is the Virtual assistant from ${hospitalName} calling. Am I speaking with ${patientData?.firstName || 'the patient'}? I'm calling to remind you about your upcoming appointment."`;
 
+                // ENHANCED: Add timing-specific messaging
                 const timingMessage = callContext.reminderType === '24_hour' ?
                     'This is your 24-hour reminder for tomorrow\'s appointment.' :
                     'This is your 1-hour reminder - your appointment is coming up soon.';
 
                 specificInstructions = `
                     APPOINTMENT REMINDER SPECIFIC INSTRUCTIONS:
-                    - Primary goal: Confirm the upcoming appointment
+                    - Primary goal: Confirm the upcoming appointment and ensure patient remembers
                     - Timing: ${timingMessage}
+                    - Appointment details: ${callContext.reminderData ? `
+                    Date: ${callContext.reminderData.appointmentDate}
+                    Time: ${callContext.reminderData.appointmentTime}
+                    Doctor: Dr. ${callContext.reminderData.doctorName} (${callContext.reminderData.doctorSpecialty})
+                    Reason: ${callContext.reminderData.reason}
+                    Confirmation: ${callContext.reminderData.confirmationNumber}` : 'Details will be provided during call'}
                     - Ask if they need to reschedule
+                    - For 24-hour reminders: Also remind about any preparation needed
+                    - For 1-hour reminders: Focus on confirmation and arrival instructions
+                    - Confirm their contact information
                     - If patient wants to cancel/reschedule, help them immediately`;
                 break;
 
             case 'follow_up':
-                roleAndGreeting = `You are a Virtual assistant calling from ${hospitalName} for an OUTBOUND follow-up call.
+                roleAndGreeting = `You are an Virtual assistant calling from ${hospitalName} for an OUTBOUND follow-up call. This is a check-in call to see how the patient is doing AFTER their recent appointment.
 
                 GREETING: "Hello, I am Virtual assistant calling from ${hospitalName}. Am I speaking with ${patientData?.firstName || 'the patient'}? I'm calling to follow up on your recent visit with us."`;
 
                 specificInstructions = `
                 FOLLOW-UP SPECIFIC INSTRUCTIONS:
-                - Check on patient's wellbeing after their RECENT appointment
+                - Primary goal: Check on patient's wellbeing and recovery after their RECENT appointment
                 - Be empathetic and caring
-                - Ask how they're feeling since their last visit`;
+                - Reference their PAST appointment that you're following up on
+                - Ask how they're feeling since their last visit
+                - Check if they have any concerns or questions about their recent treatment
+                - Do NOT mention upcoming appointments unless patient asks about scheduling
+                - Focus on their recovery and wellbeing from the recent visit
+                - Document any issues they mention
+                - If they report problems, offer to connect them with medical staff
+                - Only mention future appointments if they specifically ask about next steps`;
+                break;
+
+            case 'prescription_reminder':
+                roleAndGreeting = `You are an Virtual assistant calling from ${hospitalName} regarding prescription refills.
+
+                GREETING: "Hello, I am Virtual assistant calling from ${hospitalName}. Am I speaking with ${patientData?.firstName || 'the patient'}? I'm calling about your prescription refill."`;
+
+                specificInstructions = `
+                PRESCRIPTION REMINDER INSTRUCTIONS:
+                - Remind about prescription that needs refilling
+                - Check if they still need the medication
+                - Help process refill if needed
+                - Confirm pharmacy information
+                - Ask about any side effects or concerns`;
                 break;
 
             default:
-                roleAndGreeting = `You are a Virtual assistant calling from ${hospitalName}.
+                roleAndGreeting = `You are an Virtual assistant calling from ${hospitalName}. Be professional and clearly state why you're calling.
 
-                GREETING: "Hello, I am Virtual assistant calling from ${hospitalName}. Am I speaking with ${patientData?.firstName || 'the patient'}?"`;
-                break;
+                GREETING: "Hello,I am Virtual assistant calling from ${hospitalName}. Am I speaking with ${patientData?.firstName || 'the patient'}?"`;
+
+                specificInstructions = `
+                GENERAL OUTBOUND INSTRUCTIONS:
+                - Clearly state the reason for your call
+                - Be respectful of their time
+                - If this is an inconvenient time, offer to call back
+                - Stay focused on the purpose of the call`;
         }
+
+        specificInstructions += `
+
+                OUTBOUND CALL BEST PRACTICES:
+                - Always verify you're speaking to the correct person
+                - If the patient seems confused, clearly explain why you're calling
+                - Be prepared for the patient to be busy or unavailable
+                - Offer to call back at a more convenient time
+                - If they ask to be removed from calls, note this and respect their wishes
+                - If no answer or wrong number, end call gracefully
+                - Be more directive and purpose-driven than inbound calls`;
 
     } else {
-        // =====================================================================
-        // INBOUND CALLS - CORRECTED LOGIC
-        // =====================================================================
+        // Inbound call behavior (existing)
+        roleAndGreeting = `You are the Virtual receptionist for ${hospitalName}. Your role is to help patients with appointments, prescription refills, and general inquiries.
 
-        if (callContext.nameVerificationPending) {
-            // STEP 1: ASK FOR NAME FIRST
-            return `🎯 SMART CALLER VERIFICATION - STEP 1: ASK FOR NAME
+        GREETING:
+        - For new patients: "This is Virtual assistant,Thank you for calling ${hospitalName}.May I know your name, please?"
+        - For returning patients: "Hello ${patientData?.firstName || 'there'}!, I am Virtual assistant from ${hospitalName}, How are you doing? What can I help you with today?"`;
 
-YOU ARE IN NAME COLLECTION MODE.
+        specificInstructions = `
+        INBOUND CALL INSTRUCTIONS:
+        - Listen to what the patient needs first
+        - Be reactive to their requests
+        - Use stored patient information efficiently
+        - Let the conversation flow naturally based on their needs
 
-YOUR FIRST ACTION: Greet the caller and ask for their name.
-Example: "Hello! Thank you for calling ${hospitalName}. I'm your virtual assistant. May I know your name, please?"
+        NEW PATIENT HANDLING:
+        - When a new caller connects (no existing patient record):
+        1. Greet them politely.
+        2. Once they provide their name, use it in all future responses.
+            Example: "Nice to meet you. How can I help you today?"
+        3. Do not immediately ask for all details like date of birth or gender.
+        4. Continue the conversation naturally — ask how you can help them.
+        5. If the caller says they want to:
+            - book an appointment
+            - check a report
+            - request medication
+            - or any task that requires patient data
+            then politely say:
+            "I’ll quickly register your details so I can proceed."
+            and collect:
+            - Last name
+            - Age
+            - Gender
+            - Date of birth
+        6. After collecting these, call the **create_patient** function.
+        7. Once the patient is created, use their name for all future references and proceed with the requested task.
 
-${patientData ? `[SYSTEM NOTE: Backend found ${patientData.firstName} ${patientData.lastName} - DO NOT mention this yet]` : '[SYSTEM NOTE: No patient in backend]'}
-
-⚠️⚠️⚠️ CRITICAL FLOW - READ CAREFULLY ⚠️⚠️⚠️
-
-STEP-BY-STEP PROCESS:
-1. 🗣️ SAY: "Hello! Thank you for calling ${hospitalName}.I'm your virtual assistant. May I know your name, please?"
-2. ⏸️ STOP and WAIT for user to speak
-3. 👂 LISTEN to their response
-4. ✅ AFTER they tell you their name, call: verify_caller_name(caller_name: "name they said")
-5. ⏸️ WAIT for function result
-6. ✅ Continue based on verification result
-
-⚠️ IMPORTANT RULES:
-- DO NOT call verify_caller_name BEFORE asking the question!
-- WAIT for them to tell you their name!
-- ONLY call verify_caller_name AFTER they have spoken!`;
-
-        } else if (callContext.callerContext?.callerIsPatient) {
-            // =====================================================================
-            // CALLER IS THE PATIENT - CORRECTED: ALWAYS ASK WHO APPOINTMENT IS FOR
-            // =====================================================================
-            const patientName = callContext.patientData.firstName;
-
-            roleAndGreeting = `✅ CALLER VERIFIED: ${patientName} (Patient calling from their own phone)
-
-GREETING: "Hello ${patientName}! How can I help you today?"`;
-
-            specificInstructions = `
-✅ VERIFIED PATIENT CALLING - BOOKING INSTRUCTIONS:
-
-⚠️ CRITICAL: Even though ${patientName} is calling from their own phone, ALWAYS ask who the appointment is for!
-
-APPOINTMENT BOOKING FLOW:
-When ${patientName} says they want to book an appointment:
-
-STEP 1: ALWAYS ASK FIRST:
-"Who would you like to book this appointment for? Is it for yourself or for someone else?"
-
-STEP 2: BASED ON THEIR ANSWER:
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-OPTION A: "For myself" / "For me" / "It's for me"
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-   1. Collect: doctor, date, time, reason
-   2. Call book_appointment with:
-      - booking_type: "self"
-   
-   ⚠️ Use their stored info automatically - no need to ask for their details
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-OPTION B: "For my son/daughter/mother/father/wife/etc." / "For someone else"
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-   1. Ask: "What is their name?"
-   2. Ask: "What is your relationship to them?" (mother, father, son, daughter, spouse, etc.)
-   3. Ask: "Have they been a patient here before?"
-   
-   IF THEY HAVE BEEN A PATIENT:
-   4. Ask: "Can you provide their phone number?"
-   5. Call check_patient_exists with their details
-   6. If found: "Great! I found their record. They last visited on [date]."
-   7. If not found: Collect their full information
-   
-   IF THEY HAVE NOT BEEN A PATIENT:
-   4. Collect: first name, last name, phone, date of birth, age, gender
-   
-   8. Then collect appointment details: doctor, date, time, reason
-   9. Call book_appointment with:
-      - booking_type: "family"
-      - patient_firstname: "[their family member's name]"
-      - patient_lastname: "[their family member's last name]"
-      - patient_phone: "[family member's phone]"
-      - patient_dob: "[family member's DOB]"
-      - patient_age: "[family member's age]"
-      - relationship: "[relationship to patient]"
-   
-   ⚠️ CRITICAL: Book in FAMILY MEMBER'S NAME, not ${patientName}'s name!
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-❌ NEVER ASSUME: Even if ${patientName} is calling, don't automatically assume it's for them!
-✅ ALWAYS ASK: "Who is this appointment for?"`;
-
-        } else if (callContext.callerContext?.callerIsPatient === false) {
-            // =====================================================================
-            // CALLER IS FAMILY MEMBER - CORRECTED: ASK WHO APPOINTMENT IS FOR
-            // =====================================================================
-            const callerName = callContext.callerContext.callerName;
-            const patientFirstName = callContext.patientData.firstName;
-            const patientLastName = callContext.patientData.lastName;
-            const patientPhone = callContext.patientData.phone;
-            const patientDob = callContext.patientData.dob;
-            const relationship = callContext.callerContext.relationship || 'family member';
-
-            roleAndGreeting = `✅ CALLER VERIFIED: ${callerName} (${relationship} of ${patientFirstName})
-
-Calling from ${patientFirstName}'s phone.
-
-GREETING: "Hello ${callerName}! How can I help you today?"`;
-
-            specificInstructions = `
-✅ VERIFIED FAMILY MEMBER CALLING - BOOKING INSTRUCTIONS:
-
-You are speaking with: ${callerName} (${relationship} of ${patientFirstName} ${patientLastName})
-They are calling from ${patientFirstName}'s phone.
-
-⚠️ CRITICAL: Don't assume who the appointment is for - could be for the patient OR for the caller!
-
-APPOINTMENT BOOKING FLOW:
-When ${callerName} wants to book an appointment:
-
-STEP 1: ALWAYS ASK FIRST:
-"Who would you like to book this appointment for? Is it for ${patientFirstName} or for yourself?"
-
-STEP 2: BASED ON THEIR ANSWER:
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-OPTION A: "For ${patientFirstName}" / "For them" / "For the patient"
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-   1. Collect: doctor, date, time, reason
-   2. Call book_appointment with:
-      - booking_type: "family"
-      - patient_firstname: "${patientFirstName}"
-      - patient_lastname: "${patientLastName}"
-      - patient_phone: "${patientPhone}"
-      - patient_dob: "${patientDob}"
-      - relationship: "${relationship}"
-   
-   ⚠️ Book in ${patientFirstName}'s name using stored info
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-OPTION B: "For myself" / "For me" / "I need an appointment"
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-   1. Ask: "Have you been a patient here before?"
-   
-   IF YES:
-   2. Ask: "What is your phone number?"
-   3. Call check_patient_exists with their phone
-   4. If found: "Great! I found your record."
-   5. If not found: Collect their information
-   
-   IF NO:
-   2. Collect: last name, phone, date of birth, age, gender
-   
-   6. Then collect appointment details: doctor, date, time, reason
-   7. Call book_appointment with:
-      - booking_type: "self"
-   
-   ⚠️ Book in ${callerName}'s name, NOT ${patientFirstName}'s name!
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-OPTION C: "For my son/daughter/mother/etc." (someone else)
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-   Follow the same process as booking for family members above
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-❌ NEVER ASSUME: Just because they're calling from ${patientFirstName}'s phone doesn't mean the appointment is for ${patientFirstName}!
-✅ ALWAYS ASK: "Who is this appointment for?"`;
-
-        } else {
-            // =====================================================================
-            // NEW CALLER (NOT IN SYSTEM)
-            // =====================================================================
-            roleAndGreeting = `You are the Virtual receptionist for ${hospitalName}.
-
-GREETING: "Hello! Thank you for calling ${hospitalName}.I'm your virtual assistant. May I know your name, please?"`;
-
-            specificInstructions = `
-NEW CALLER HANDLING:
-- Greet them politely and ask for their name
-- Once they provide their name, use it in all future responses
-- Continue the conversation naturally
-- If they want to book an appointment or any service requiring patient data:
-  1. Say: "I'll quickly register your details so I can proceed."
-  2. Collect: last name, age, gender, date of birth
-  3. Call create_patient function
-  4. Then proceed with their request
-
-APPOINTMENT BOOKING FOR NEW CALLERS:
-When a new caller wants to book:
-1. ALWAYS ask: "Who is this appointment for? Is it for yourself or someone else?"
-2. Based on answer, follow appropriate booking flow
-3. If for themselves: collect their info and book
-4. If for someone else: ask for relationship and that person's details`;
-        }
+        REMEMBER:
+        - Always use the patient’s first name in friendly responses.
+        - Keep the flow conversational and natural.
+        - Don’t overwhelm with too many questions at once.
+        - Only create a patient when enough data is collected.
+`
     }
 
     return `${roleAndGreeting}
@@ -333,37 +233,143 @@ When a new caller wants to book:
         - Available Departments: ${departments.join(', ')}
         - Hours: ${callContext.hospital.weekdayHours || '8:00 AM - 8:00 PM'} (weekdays)
         - Weekend Hours: ${callContext.hospital.weekendHours || '9:00 AM - 5:00 PM'}
-
-        ${appointmentContext}
+        - Emergency Department: '24/7'
 
         ${specificInstructions}
 
         COMMUNICATION STYLE:
-        - Sound natural and conversational
+        - Sound natural and conversational, like a helpful human ${callContext.type === 'outbound' ? 'healthcare coordinator' : 'receptionist'}
         - Use casual, friendly language: "Sure!", "Absolutely!", "Let me check that for you"
-        - Vary your responses - don't sound robotic
+        - Vary your responses - don't sound robotic or repetitive
         - Show genuine interest: "That sounds good", "Perfect!", "Great choice"
-        - Use contractions: "I'll", "You're", "We've", "Let's"
+        - Use natural speech patterns with contractions: "I'll", "You're", "We've", "Let's"
+        - ${callContext.type === 'outbound' ? 'Be respectful of their time and stay focused on the call purpose' : 'Make patients feel welcomed and comfortable'}
+
+        CALL ENDING INSTRUCTIONS:
+        - When you call the end_call function, that means the conversation is COMPLETELY FINISHED
+        - Do NOT generate any additional responses after calling end_call
+        - Your final message should be your natural goodbye BEFORE calling end_call
+        - The end_call function call itself should be the very last action
+        - DO NOT explain that you're ending the call or provide additional farewells after calling end_call
+
+        CALL ENDING DETECTION:
+        - ONLY end the call when the patient CLEARLY indicates they want to end the conversation
+        - Do NOT end the call just because patient says "thank you" - this could be in the middle of conversation
+        - Look for CLEAR ending phrases like:
+        * "Nothing else" + any closing phrase
+        * "I'm good" + "goodbye/bye"
+        * "Have a good day" (from patient to you)
+        * Patient says "goodbye" or "bye" 
+        - Do NOT end for simple "thank you" responses during ongoing conversation
+        - When patient CLEARLY wants to end: 
+        1. Say your natural goodbye message
+        2. THEN immediately call end_call function
+        3. DO NOT say anything else after calling end_call
+        - Ask "Is there anything else I can help you with today?" if unsure whether patient wants to continue
 
         CORE RESPONSIBILITIES:
         - Help patients schedule, reschedule, or cancel appointments
         - Process prescription refill requests
         - Check doctor availability
-        - Answer questions about hospital services
+        - Answer questions about hospital services, hours, location, and departments
+        - Show upcoming appointments when requested
+        - ${callContext.type === 'outbound' ? 'Complete the specific purpose of this outbound call efficiently' : 'Use stored patient information efficiently'}
 
-        CALL ENDING DETECTION:
-        - ONLY end the call when the patient CLEARLY indicates they want to end
-        - Do NOT end just because patient says "thank you"
-        - Look for phrases like: "Nothing else", "I'm good goodbye", "Have a good day", "Goodbye"
-        - When patient clearly wants to end:
-          1. Say your goodbye message
-          2. THEN call end_call function
-          3. DO NOT say anything after calling end_call
+        ENHANCED APPOINTMENT BOOKING - CRITICAL FLOW:
+        When someone wants to book an appointment, ALWAYS follow this sequence:
 
-        ⚠️⚠️⚠️ CRITICAL BOOKING RULE ⚠️⚠️⚠️
-        ALWAYS ask "Who is this appointment for?" BEFORE collecting any other booking details!
-        NEVER assume who the appointment is for based on who is calling!
-        `;
+        1. IDENTIFY WHO THE APPOINTMENT IS FOR:
+           Ask: "Is this appointment for yourself, a family member, or a care center patient?"
+           
+           Listen for keywords:
+           - "for me", "myself", "I need" Ã¢â€ â€™ SELF
+           - "my son/daughter/mother/father/wife/husband", "family" Ã¢â€ â€™ FAMILY
+           - "care center", "nursing home", "resident" Ã¢â€ â€™ CARE_CENTER
+
+        2. FOR SELF BOOKINGS:
+           - Use caller's stored information
+           - Collect: doctor, date, time, reason
+           - Use book_appointment with booking_type: "self"
+
+        3. FOR FAMILY BOOKINGS:
+           - Ask: "What is your relationship to them?" (spouse, parent, child, etc.)
+           - Ask: "Have they been a patient here before?"
+           
+           IF YES:
+           - Ask: "Can you provide their phone number?"
+           - Use check_patient_exists function first
+           - If found: "I found their record. They last visited on [date]."
+           - If not found: Collect their full information
+           
+           IF NO:
+           - Collect: first name, last name, phone, date of birth, gender
+           
+           - Then collect appointment details
+           - Use book_appointment with booking_type: "family"
+           - IMPORTANT: Book in FAMILY MEMBER'S NAME, not caller's name
+
+        4. FOR CARE CENTER BOOKINGS:
+           - Ask: "What is the patient's name?"
+           - Ask: "Which care center are they from?"
+           - Ask: "Do you have their patient ID?"
+           - Ask: "Have they been a patient here before?"
+           
+           IF YES:
+           - Use check_patient_exists function first
+           - If found: "I found their record in our system."
+           - If not found: Collect their information
+           
+           IF NO:
+           - Collect: full name, facility name, patient ID, date of birth
+           
+           - Then collect appointment details
+           - Use book_appointment with booking_type: "care_center"
+           - IMPORTANT: Book in PATIENT'S NAME
+
+        5. ALWAYS CONFIRM before booking:
+           - FOR SELF: "You're booking for yourself with Dr. [Name] on [Date] at [Time]."
+           - FOR FAMILY: "You're booking for [Family Member Name], your [relationship], with Dr. [Name]..."
+           - FOR CARE CENTER: "You're booking for [Patient Name] from [Facility] with Dr. [Name]..."
+        
+        6. After booking, provide the confirmation number
+
+        CRITICAL BOOKING RULES:
+        - ALWAYS ask who the appointment is for FIRST before collecting any other information
+        - ALWAYS use check_patient_exists before creating new patients (family/care center)
+        - NEVER book in caller's name for family or care center bookings
+        - ALWAYS provide confirmation numbers after successful booking
+
+        IMPORTANT LIMITATIONS:
+        - Never provide medical advice, diagnosis, or treatment recommendations
+        - For medical concerns: "I'll need to connect you with one of our medical professionals..."
+        - Cannot access medical records or discuss protected health information
+        - For complex issues: "Let me connect you with our staff member who can assist you further..."
+
+        HUMAN TRANSFER CAPABILITY:
+        - You CAN transfer callers to human staff when requested
+        - Listen for phrases like: "speak to a person", "talk to someone real", "human representative", "transfer me", "I need to speak to staff"
+        - When someone asks for a human, respond warmly: "Of course! I'll transfer you to one of our staff members right away. Please hold on."
+        - Use the transfer_to_human function when patients request it
+        - Common transfer reasons:
+        * Patient explicitly asks for human help
+        * Complex medical questions beyond your scope
+        * Billing or insurance issues
+        * Complaints or sensitive situations
+        * Technical issues you cannot resolve
+
+        TRANSFER SCENARIOS:
+        - "Can I speak to a real person?" Ã¢â€ â€™ "Absolutely! Let me connect you with our staff right away."
+        - "This is too complicated" Ã¢â€ â€™ "No problem! I'll transfer you to someone who can help."
+        - "I need to speak to someone about billing" Ã¢â€ â€™ "I'll transfer you to our billing department."
+        - "I have a complaint" Ã¢â€ â€™ "I understand. Let me connect you with our patient relations team."
+
+        IMPORTANT TRANSFER NOTES:
+        - Always be positive about transfers - never make it seem like a failure
+        - Briefly explain what you're doing: "I'm transferring you now..."
+        - If transfer fails, apologize and offer to help yourself
+        - Don't over-explain technical details about the transfer process
+
+        Remember: You're a helpful, ${callContext.type === 'outbound' ? 'proactive' : 'responsive'} person who works at ${hospitalName} - make every interaction professional and valuable.`;
 }
 
 export async function callAssistant(connection, req) {
@@ -593,7 +599,7 @@ export async function callAssistant(connection, req) {
                         output: {
                             format: { type: 'audio/pcmu' },
                             voice: 'cedar',
-                            "speed": 1.1
+                            "speed": 1.0
                         },
                     },
                     tools: [
@@ -677,6 +683,10 @@ export async function callAssistant(connection, req) {
                                         type: "string",
                                         description: "Patient's last name (for family/care center bookings)"
                                     },
+                                    patient_phone: {
+                                        type: "string",
+                                        description: "Patient's phone number (for family/care center bookings)"
+                                    },
                                     patient_dob: {
                                         type: "string",
                                         description: "Patient's date of birth in YYYY-MM-DD format (for family/care center bookings)"
@@ -756,17 +766,13 @@ export async function callAssistant(connection, req) {
                                         type: "string",
                                         description: "Patient's phone number"
                                     },
-                                    original_doctor: {
+                                    original_doctor_name: {
                                         type: "string",
                                         description: "Original doctor's name"
                                     },
                                     original_date: {
                                         type: "string",
                                         description: "Original appointment date (YYYY-MM-DD)"
-                                    },
-                                    original_time: {
-                                        type: "string",
-                                        description: "Original appointment time (HH:MM)"
                                     },
                                     new_date: {
                                         type: "string",
@@ -808,7 +814,7 @@ export async function callAssistant(connection, req) {
                                         description: "Reason for cancellation"
                                     }
                                 },
-                                required: ["patient_phone", "date", "reason"]
+                                required: ["patient_phone"]
                             }
                         },
                         {
@@ -1029,38 +1035,7 @@ export async function callAssistant(connection, req) {
                                 },
                                 required: ["booking_type"]
                             }
-                        },
-                        {
-                            type: "function",
-                            name: "verify_caller_name",
-                            description: "CRITICAL: Call this IMMEDIATELY after caller provides their name. Verifies caller identity by comparing provided name with patient record found by phone number. System automatically determines if caller is patient or family member.",
-                            parameters: {
-                                type: "object",
-                                properties: {
-                                    caller_name: {
-                                        type: "string",
-                                        description: "The name the caller provided when asked 'May I know your name?'"
-                                    }
-                                },
-                                required: ["caller_name"]
-                            }
-                        },
-                        {
-                            type: "function",
-                            name: "confirm_relationship",
-                            description: "Called when caller's name doesn't match patient. Confirms the relationship between caller and patient.",
-                            parameters: {
-                                type: "object",
-                                properties: {
-                                    relationship: {
-                                        type: "string",
-                                        description: "Caller's relationship to patient (mother, father, son, daughter, spouse, caregiver, etc.)",
-                                        enum: ["mother", "father", "son", "daughter", "spouse", "husband", "wife", "sibling", "brother", "sister", "guardian", "caregiver", "friend", "other"]
-                                    }
-                                },
-                                required: ["relationship"]
-                            }
-                        },
+                        }
                     ],
                     tool_choice: "auto",
                     max_output_tokens: "inf",
@@ -1070,9 +1045,9 @@ export async function callAssistant(connection, req) {
             openAiWs.send(JSON.stringify(sessionUpdate));
 
             // Send initial greeting after a short delay to ensure stream is ready
-            // setTimeout(() => {
-            sendInitialConversationItem();
-            // }, 200);
+            setTimeout(() => {
+                sendInitialConversationItem();
+            }, 200);
         });
 
         // Listen for messages from OpenAI WebSocket
@@ -1422,8 +1397,8 @@ export async function callAssistant(connection, req) {
                     extractedEntities = { ...extractedEntities, ...args };
 
                     // Ensure phone comes from callLog if missing
-                    if (!args.patient_phone && from) {
-                        args.patient_phone = from;
+                    if (!args.patient_phone && callLog?.from) {
+                        args.patient_phone = callLog.from;
                     }
 
                     result = await rescheduleAppointmentByDetails(args);
@@ -1434,8 +1409,8 @@ export async function callAssistant(connection, req) {
                     extractedEntities = { ...extractedEntities, ...args };
 
                     // Ensure phone comes from callLog if missing
-                    if (!args.patient_phone && from) {
-                        args.patient_phone = from;
+                    if (!args.patient_phone && callLog?.from) {
+                        args.patient_phone = callLog.from;
                     }
 
                     result = await cancelAppointmentByDetails(args);
@@ -1600,183 +1575,6 @@ export async function callAssistant(connection, req) {
                             error: result.error
                         };
                     }
-                    break;
-
-                case 'verify_caller_name':
-                    console.log(`🔍 Verifying caller name: "${args.caller_name}"`);
-                    console.log(`📋 Patient in system: ${patientData?.firstName} ${patientData?.lastName}`);
-
-                    let nameMatches = false;
-
-                    if (patientData && patientData.firstName) {
-                        // ✅ CRITICAL FIX: Trim ALL whitespace from both sides AND normalize spaces
-                        const callerNameLower = args.caller_name.toLowerCase().trim().replace(/\s+/g, ' ');
-                        const firstName = (patientData.firstName || '').toLowerCase().trim().replace(/\s+/g, ' ');
-                        const lastName = (patientData.lastName || '').toLowerCase().trim().replace(/\s+/g, ' ');
-
-                        console.log(`🔍 Cleaned comparison:`);
-                        console.log(`   Caller: "${callerNameLower}"`);
-                        console.log(`   Patient First: "${firstName}"`);
-                        console.log(`   Patient Last: "${lastName}"`);
-
-                        // Split caller name into words
-                        const callerWords = callerNameLower.split(/\s+/).filter(word => word.length > 0);
-
-                        if (callerWords.length === 1) {
-                            // Single name provided - check if it matches first name OR last name exactly
-                            nameMatches = (callerNameLower === firstName) || (callerNameLower === lastName);
-                            console.log(`✅ Single name check: "${callerNameLower}" === "${firstName}" OR "${lastName}" = ${nameMatches}`);
-
-                        } else if (callerWords.length === 2) {
-                            // Two names provided - check if it matches "firstname lastname" exactly
-                            const callerFirst = callerWords[0];
-                            const callerLast = callerWords[1];
-                            nameMatches = (callerFirst === firstName && callerLast === lastName) ||
-                                (callerFirst === lastName && callerLast === firstName); // Handle reverse order
-                            console.log(`✅ Full name check: "${callerFirst} ${callerLast}" vs "${firstName} ${lastName}" = ${nameMatches}`);
-
-                        } else if (callerWords.length > 2) {
-                            // Multiple words - check if first and last names are present
-                            nameMatches = callerWords.includes(firstName) &&
-                                (lastName ? callerWords.includes(lastName) : true);
-                            console.log(`✅ Multi-word check: includes "${firstName}" and "${lastName}" = ${nameMatches}`);
-                        }
-                    }
-
-                    console.log(`✅ Final match result: ${nameMatches}`);
-
-                    if (nameMatches && patientData) {
-                        // ═══════════════════════════════════════════════════════════════
-                        // ✅ NAMES MATCH - Caller IS the patient
-                        // ═══════════════════════════════════════════════════════════════
-                        console.log(`✅ Name matches! ${args.caller_name} is the patient ${patientData.firstName}`);
-
-                        callContext.callerIdentityVerified = true;
-                        callContext.nameVerificationPending = false;
-                        callContext.callerContext = {
-                            callerName: args.caller_name,
-                            callerIsPatient: true,
-                            patientFhirId: patientFhirId,
-                            patientData: patientData,
-                            relationship: 'self'
-                        };
-
-                        // Update global context
-                        global.callContextMap.set(callContext.twilioCallSid, callContext);
-
-                        result = {
-                            success: true,
-                            caller_is_patient: true,
-                            verified: true,
-                            patient_name: `${patientData.firstName.trim()} ${patientData.lastName?.trim() || ''}`.trim(),
-                            message: `Great! Hello ${patientData.firstName.trim()}. I have your information here. How can I help you today?`,
-                            instructions_for_ai: `Patient ${patientData.firstName.trim()} is calling. When they want to book an appointment, FIRST ask: "Who would you like to book this appointment for? Is it for yourself or for someone else?"`
-                        };
-
-                    } else if (patientData && !nameMatches) {
-                        // ═══════════════════════════════════════════════════════════════
-                        // ❌ NAMES DON'T MATCH - Family member calling from patient's phone
-                        // ═══════════════════════════════════════════════════════════════
-                        console.log(`❌ Name doesn't match! ${args.caller_name} is NOT patient ${patientData.firstName}`);
-
-                        callContext.nameVerificationPending = false;
-                        callContext.callerContext = {
-                            callerName: args.caller_name,
-                            callerIsPatient: false,
-                            patientFhirId: patientFhirId,
-                            patientData: patientData,
-                            needsRelationship: true
-                        };
-
-                        // Update global context
-                        global.callContextMap.set(callContext.twilioCallSid, callContext);
-
-                        const patientFirstName = patientData.firstName.trim();
-                        const patientLastName = patientData.lastName?.trim() || '';
-                        const patientFullName = `${patientFirstName} ${patientLastName}`.trim();
-
-                        result = {
-                            success: true,
-                            caller_is_patient: false,
-                            verified: false,
-                            caller_name: args.caller_name,
-                            patient_name: patientFullName,
-                            message: `Hello ${args.caller_name}! I see you're calling from ${patientFullName}'s phone. May I ask - what is your relationship to ${patientFirstName}?`,
-                            instructions_for_ai: `IMPORTANT: This is ${args.caller_name}, NOT ${patientFirstName}. You MUST now ask for their relationship. Say: "What is your relationship to ${patientFirstName}?" and wait for answer. Options: mother, father, son, daughter, spouse, sibling, etc.`
-                        };
-
-                    } else {
-                        // ═══════════════════════════════════════════════════════════════
-                        // 🆕 NEW CALLER - Not in system at all
-                        // ═══════════════════════════════════════════════════════════════
-                        console.log(`🆕 New caller: ${args.caller_name} - not in our system`);
-
-                        callContext.nameVerificationPending = false;
-                        callContext.callerContext = {
-                            callerName: args.caller_name,
-                            isNewCaller: true
-                        };
-
-                        // Update global context
-                        global.callContextMap.set(callContext.twilioCallSid, callContext);
-
-                        result = {
-                            success: true,
-                            caller_is_patient: false,
-                            verified: false,
-                            new_caller: true,
-                            caller_name: args.caller_name,
-                            message: `Hello ${args.caller_name}! Thank you for calling. How can I help you today?`,
-                            instructions_for_ai: `This is a new caller: ${args.caller_name}. When they want to book or need services, collect their information to create a patient record.`
-                        };
-                    }
-
-                    console.log('🔍 Verification result:', result);
-                    break;
-
-                case 'confirm_relationship':
-                    console.log(`🔗 Confirming relationship: ${args.relationship}`);
-                    console.log(`📋 Caller: ${callContext.callerContext.callerName}`);
-                    console.log(`📋 Patient: ${callContext.callerContext.patientData.firstName} ${callContext.callerContext.patientData.lastName}`);
-
-                    // Update context with relationship
-                    callContext.callerIdentityVerified = true;
-                    callContext.callerContext.relationship = args.relationship;
-                    callContext.callerContext.verified = true;
-                    callContext.callerContext.needsRelationship = false;
-
-                    // Update global context
-                    global.callContextMap.set(callContext.twilioCallSid, callContext);
-
-                    // Create FHIR RelatedPerson relationship
-                    try {
-                        await linkRelatedPerson(
-                            callContext.callerContext.patientFhirId,
-                            from, // Caller's phone
-                            args.relationship,
-                            callContext.callerContext.callerName
-                        );
-                        console.log('✅ Created RelatedPerson relationship in FHIR');
-                    } catch (error) {
-                        console.error('⚠️ Error creating RelatedPerson:', error);
-                        // Continue anyway - non-critical error
-                    }
-
-                    const callerName = callContext.callerContext.callerName;
-                    const patientFirstName = callContext.callerContext.patientData.firstName;
-                    const patientLastName = callContext.callerContext.patientData.lastName;
-
-                    result = {
-                        success: true,
-                        verified: true,
-                        relationship: args.relationship,
-                        caller_name: callerName,
-                        patient_name: `${patientFirstName} ${patientLastName}`,
-                        message: `Thank you, ${callerName}! I've noted that you are ${patientFirstName}'s ${args.relationship}. How can I help you today?`,
-                        instructions_for_ai: `IMPORTANT: You are speaking with ${callerName} (${args.relationship} of ${patientFirstName} ${patientLastName}). They are calling from ${patientFirstName}'s phone. When they want to book an appointment, FIRST ask: "Who would you like to book this appointment for? Is it for ${patientFirstName} or for yourself?"`
-                    };
-
-                    console.log('🔗 Relationship confirmed:', result);
                     break;
 
                 default:

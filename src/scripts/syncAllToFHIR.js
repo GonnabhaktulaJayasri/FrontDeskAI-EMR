@@ -894,7 +894,7 @@
 //         // ========================================
 //         console.log('📋 Step 1: Verifying patient...\n');
 //         const patientResult = await fhirService.getPatient(PATIENT_ID);
-        
+
 //         if (!patientResult.success) {
 //             console.log(`❌ Patient ${PATIENT_ID} not found!`);
 //             return;
@@ -905,14 +905,14 @@
 //         const fullName = patientName ? 
 //             `${patientName.given?.join(' ') || ''} ${patientName.family || ''}`.trim() : 
 //             'Unknown';
-        
+
 //         console.log(`✅ Patient: ${fullName}\n`);
 
 //         // ========================================
 //         // 2. DELETE ALL COMMUNICATIONS
 //         // ========================================
 //         console.log('📋 Step 2: Finding and deleting ALL Communications...\n');
-        
+
 //         // Search using multiple parameters to catch all Communications
 //         const communicationSearches = [
 //             { param: 'subject', value: patientReference, desc: 'subject' },
@@ -925,16 +925,16 @@
 
 //         for (const search of communicationSearches) {
 //             console.log(`🔍 Searching Communications by ${search.desc}...`);
-            
+
 //             try {
 //                 const searchParams = {};
 //                 searchParams[search.param] = search.value;
-                
+
 //                 const result = await fhirService.searchCommunications(searchParams);
 
 //                 if (result.success && result.entries && result.entries.length > 0) {
 //                     console.log(`   Found ${result.entries.length} Communication(s)`);
-                    
+
 //                     result.entries.forEach(entry => {
 //                         const commId = entry.resource.id;
 //                         if (!allCommunications.has(commId)) {
@@ -953,16 +953,16 @@
 
 //         if (allCommunications.size > 0) {
 //             console.log('🗑️  Deleting Communications...\n');
-            
+
 //             let count = 0;
 //             for (const [commId, comm] of allCommunications) {
 //                 count++;
 //                 const category = comm.category?.[0]?.coding?.[0]?.display || 'Unknown';
 //                 const status = comm.status || 'unknown';
-                
+
 //                 console.log(`   [${count}/${allCommunications.size}] Deleting Communication/${commId}`);
 //                 console.log(`       Type: ${category}, Status: ${status}`);
-                
+
 //                 try {
 //                     const result = await fhirService.deleteCommunication(commId);
 //                     if (result.success) {
@@ -977,7 +977,7 @@
 //                     console.log(`       ❌ Failed: ${error.message}\n`);
 //                 }
 //             }
-            
+
 //             console.log(`✅ Deleted ${stats.communicationsDeleted} Communication(s)`);
 //             if (stats.communicationsFailed > 0) {
 //                 console.log(`⚠️  Failed to delete ${stats.communicationsFailed} Communication(s)\n`);
@@ -1007,12 +1007,12 @@
 //             try {
 //                 const searchParams = {};
 //                 searchParams[resource.param] = patientReference;
-                
+
 //                 const result = await fhirService.searchResources(resource.type, searchParams);
 
 //                 if (result.success && result.entries && result.entries.length > 0) {
 //                     console.log(`🗑️  Found ${result.entries.length} ${resource.type}(s), deleting...`);
-                    
+
 //                     for (const entry of result.entries) {
 //                         const resourceId = entry.resource.id;
 //                         try {
@@ -1040,7 +1040,7 @@
 //         // ========================================
 //         console.log('📋 Step 4: Attempting patient deletion...\n');
 //         console.log(`🗑️  Deleting Patient/${PATIENT_ID} (${fullName})`);
-        
+
 //         try {
 //             await fhirService.axios.delete(`/Patient/${PATIENT_ID}`);
 //             stats.patientDeleted = true;
@@ -1048,18 +1048,18 @@
 //         } catch (error) {
 //             const errorMsg = error.response?.data?.issue?.[0]?.diagnostics || error.message;
 //             console.log(`   ❌ Failed: ${errorMsg}\n`);
-            
+
 //             // If still failing, show which resources are still blocking
 //             if (errorMsg.includes('reference')) {
 //                 console.log('   🔍 Checking for remaining references...\n');
-                
+
 //                 // Extract resource type from error message
 //                 const match = errorMsg.match(/resource (\w+)\/(\d+)/);
 //                 if (match) {
 //                     const blockingType = match[1];
 //                     const blockingId = match[2];
 //                     console.log(`   ⚠️  Blocking resource: ${blockingType}/${blockingId}`);
-                    
+
 //                     // Try to get details about the blocking resource
 //                     try {
 //                         const blockingResource = await fhirService.axios.get(`/${blockingType}/${blockingId}`);
@@ -1094,7 +1094,7 @@
 //             console.log(`✅✅✅ SUCCESS! Patient ${PATIENT_ID} has been completely deleted! ✅✅✅\n`);
 //         } else {
 //             console.log(`⚠️  Patient ${PATIENT_ID} still exists\n`);
-            
+
 //             // Do one final check for Communications
 //             const finalCommCheck = await fhirService.searchCommunications({ subject: patientReference });
 //             if (finalCommCheck.success && finalCommCheck.entries && finalCommCheck.entries.length > 0) {
@@ -1112,3 +1112,458 @@
 
 // // Run the targeted deletion
 // deletePatientTargeted();
+
+// import fhirService from '../services/fhirService.js';
+// import 'dotenv/config';
+
+// async function addSlotsForCurrentWeek() {
+//     console.log('🏥 Adding Appointment Slots for Current Week...\n');
+
+//     try {
+//         // 1. FETCH SPECIFIC DOCTORS BY EMAIL
+//         console.log('1️⃣ Fetching specific doctors...');
+
+//         const targetDoctors = [
+//             {
+//                 name: 'Dr. Sarah Johnson',
+//                 specialty: 'Cardiology',
+//                 email: 'sarah.johnson@orionwestmedical.com'
+//             },
+//             {
+//                 name: 'Dr. Michael Chen',
+//                 specialty: 'General Practice',
+//                 email: 'michael.chen@orionwestmedical.com'
+//             },
+//             {
+//                 name: 'Dr. Emily Rodriguez',
+//                 specialty: 'Pediatrics',
+//                 email: 'emily.rodriguez@orionwestmedical.com'
+//             },
+//             {
+//                 name: 'Dr. James Wilson',
+//                 specialty: 'Orthopedics',
+//                 email: 'james.wilson@orionwestmedical.com'
+//             },
+//             {
+//                 name: 'Dr. Lisa Anderson',
+//                 specialty: 'Dermatology',
+//                 email: 'lisa.anderson@orionwestmedical.com'
+//             }
+//         ];
+
+//         const doctors = [];
+
+//         // Search for each doctor by email
+//         for (const targetDoc of targetDoctors) {
+//             const practitionersResult = await fhirService.searchPractitioners({
+//                 email: targetDoc.email
+//             });
+
+//             if (practitionersResult.success && practitionersResult.data.entry && practitionersResult.data.entry.length > 0) {
+//                 const practitioner = practitionersResult.data.entry[0].resource;
+//                 const name = practitioner.name?.[0];
+//                 const fullName = name ? 
+//                     `${name.prefix?.[0] || ''} ${name.given?.[0] || ''} ${name.family || ''}`.trim() : 
+//                     targetDoc.name;
+
+//                 const specialty = practitioner.qualification?.[0]?.code?.text || 
+//                                  practitioner.qualification?.[0]?.code?.coding?.[0]?.display || 
+//                                  targetDoc.specialty;
+
+//                 doctors.push({
+//                     id: practitioner.id,
+//                     name: fullName,
+//                     specialty: specialty
+//                 });
+
+//                 console.log(`✅ Found: ${fullName} (${specialty}) - ID: ${practitioner.id}`);
+//             } else {
+//                 console.log(`⚠️  Not found: ${targetDoc.name} (${targetDoc.email})`);
+//             }
+//         }
+
+//         if (doctors.length === 0) {
+//             console.error('❌ No matching doctors found in FHIR system');
+//             return;
+//         }
+
+//         console.log(`\n✅ Found ${doctors.length} out of ${targetDoctors.length} target doctors`);
+//         console.log('');
+
+//         // 2. FETCH OR CREATE SCHEDULES FOR EACH DOCTOR
+//         console.log('2️⃣ Setting up schedules...');
+
+//         const getWeekBoundaries = () => {
+//             const now = new Date();
+//             const dayOfWeek = now.getDay();
+
+//             // Get Monday of current week
+//             const monday = new Date(now);
+//             const daysToMonday = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
+//             monday.setDate(now.getDate() + daysToMonday);
+//             monday.setHours(0, 0, 0, 0);
+
+//             // Get Friday (end of work week)
+//             const friday = new Date(monday);
+//             friday.setDate(monday.getDate() + 4);
+//             friday.setHours(23, 59, 59, 999);
+
+//             return { monday, friday };
+//         };
+
+//         const { monday: weekStart, friday: weekEnd } = getWeekBoundaries();
+//         console.log(`📅 Week Range: ${weekStart.toLocaleDateString()} to ${weekEnd.toLocaleDateString()}\n`);
+
+//         const schedules = [];
+
+//         for (const doctor of doctors) {
+//             // Search for existing schedule for this doctor
+//             const scheduleSearch = await fhirService.searchSchedules({
+//                 actor: `Practitioner/${doctor.id}`
+//             });
+
+//             let scheduleId;
+
+//             if (scheduleSearch.success && scheduleSearch.data.entry && scheduleSearch.data.entry.length > 0) {
+//                 // Use existing schedule
+//                 scheduleId = scheduleSearch.data.entry[0].resource.id;
+//                 console.log(`✅ Using existing schedule for ${doctor.name} - ID: ${scheduleId}`);
+//             } else {
+//                 // Create new schedule
+//                 const schedule = {
+//                     resourceType: 'Schedule',
+//                     active: true,
+//                     serviceCategory: [{
+//                         coding: [{
+//                             system: 'http://terminology.hl7.org/CodeSystem/service-category',
+//                             code: '17',
+//                             display: 'General Practice'
+//                         }]
+//                     }],
+//                     serviceType: [{
+//                         coding: [{
+//                             system: 'http://terminology.hl7.org/CodeSystem/service-type',
+//                             code: '124',
+//                             display: 'General Practice'
+//                         }]
+//                     }],
+//                     specialty: [{
+//                         coding: [{
+//                             system: 'http://snomed.info/sct',
+//                             code: '394814009',
+//                             display: doctor.specialty
+//                         }],
+//                         text: doctor.specialty
+//                     }],
+//                     actor: [{
+//                         reference: `Practitioner/${doctor.id}`,
+//                         display: doctor.name
+//                     }],
+//                     planningHorizon: {
+//                         start: weekStart.toISOString(),
+//                         end: weekEnd.toISOString()
+//                     },
+//                     comment: `Current week schedule for ${doctor.name}`
+//                 };
+
+//                 const result = await fhirService.createSchedule(schedule);
+//                 if (result.success) {
+//                     scheduleId = result.data.id;
+//                     console.log(`✅ Created new schedule for ${doctor.name} - ID: ${scheduleId}`);
+//                 } else {
+//                     console.error(`❌ Failed to create schedule for ${doctor.name}:`, result.error);
+//                     continue;
+//                 }
+//             }
+
+//             schedules.push({
+//                 scheduleId,
+//                 doctorId: doctor.id,
+//                 doctorName: doctor.name,
+//                 specialty: doctor.specialty
+//             });
+//         }
+//         console.log('');
+
+//         // 3. CREATE COMPREHENSIVE APPOINTMENT SLOTS
+//         console.log('3️⃣ Creating Appointment Slots...');
+//         console.log('   ⏰ Hours: 8:00 AM - 6:00 PM (excluding 12:00 PM - 1:00 PM lunch)');
+//         console.log('   📊 Slot Duration: 30 minutes');
+//         console.log('   📋 Slots per day per doctor: 18 slots');
+//         console.log('');
+
+//         let totalSlots = 0;
+//         const slotsByDoctor = {};
+//         const slotsByDay = {};
+
+//         for (const schedule of schedules) {
+//             slotsByDoctor[schedule.doctorName] = 0;
+//             console.log(`   👨‍⚕️ Creating slots for ${schedule.doctorName} (${schedule.specialty})...`);
+
+//             // Iterate through each day of the current week
+//             const currentDate = new Date(weekStart);
+
+//             while (currentDate <= weekEnd) {
+//                 const dayOfWeek = currentDate.getDay();
+//                 const dayName = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][dayOfWeek];
+//                 const dateKey = currentDate.toLocaleDateString();
+
+//                 // Only weekdays (Monday-Friday)
+//                 if (dayOfWeek >= 1 && dayOfWeek <= 5) {
+//                     let daySlotsCount = 0;
+
+//                     // Create slots from 8 AM to 6 PM with 30-minute intervals
+//                     // Morning: 8:00 AM - 12:00 PM (8 slots)
+//                     // Lunch break: 12:00 PM - 1:00 PM (NO SLOTS)
+//                     // Afternoon: 1:00 PM - 6:00 PM (10 slots)
+//                     // Total: 18 slots per day per doctor
+
+//                     for (let hour = 8; hour < 18; hour++) {
+//                         // Skip lunch hour (12 PM to 1 PM)
+//                         if (hour === 12) continue;
+
+//                         // Create two 30-minute slots per hour
+//                         for (let minutes = 0; minutes < 60; minutes += 30) {
+//                             const startTime = new Date(currentDate);
+//                             startTime.setHours(hour, minutes, 0, 0);
+
+//                             const endTime = new Date(startTime);
+//                             endTime.setMinutes(startTime.getMinutes() + 30);
+
+//                             // Skip if slot is in the past
+//                             const now = new Date();
+//                             if (startTime < now) {
+//                                 continue;
+//                             }
+
+//                             const slot = {
+//                                 resourceType: 'Slot',
+//                                 schedule: {
+//                                     reference: `Schedule/${schedule.scheduleId}`
+//                                 },
+//                                 status: 'free',
+//                                 start: startTime.toISOString(),
+//                                 end: endTime.toISOString(),
+//                                 comment: `Available appointment slot with ${schedule.doctorName}`,
+//                                 serviceType: [{
+//                                     coding: [{
+//                                         system: 'http://terminology.hl7.org/CodeSystem/service-type',
+//                                         code: '124',
+//                                         display: schedule.specialty
+//                                     }],
+//                                     text: schedule.specialty
+//                                 }],
+//                                 extension: [{
+//                                     url: 'http://hospital-system/slot-info',
+//                                     valueString: JSON.stringify({
+//                                         doctorName: schedule.doctorName,
+//                                         specialty: schedule.specialty,
+//                                         timeSlot: `${hour}:${minutes.toString().padStart(2, '0')}`
+//                                     })
+//                                 }]
+//                             };
+
+//                             const result = await fhirService.createSlot(slot);
+//                             if (result.success) {
+//                                 totalSlots++;
+//                                 daySlotsCount++;
+//                                 slotsByDoctor[schedule.doctorName]++;
+
+//                                 if (!slotsByDay[dateKey]) {
+//                                     slotsByDay[dateKey] = 0;
+//                                 }
+//                                 slotsByDay[dateKey]++;
+//                             } else {
+//                                 console.error(`      ❌ Failed to create slot at ${startTime.toLocaleString()}: ${result.error}`);
+//                             }
+//                         }
+//                     }
+
+//                     console.log(`      ✅ ${dayName} ${dateKey}: ${daySlotsCount} slots created`);
+//                 } else {
+//                     console.log(`      ⏭️  Skipping ${dayName} ${dateKey} (weekend)`);
+//                 }
+
+//                 // Move to next day
+//                 currentDate.setDate(currentDate.getDate() + 1);
+//             }
+
+//             console.log(`      📊 Total for ${schedule.doctorName}: ${slotsByDoctor[schedule.doctorName]} slots`);
+//             console.log('');
+//         }
+
+//         console.log(`✅ TOTAL SLOTS CREATED: ${totalSlots}`);
+//         console.log('');
+
+//         // 4. DETAILED STATISTICS
+//         console.log('📊 DETAILED STATISTICS:');
+//         console.log('='.repeat(60));
+
+//         console.log('\n📋 Slots per Doctor:');
+//         Object.entries(slotsByDoctor).forEach(([doctor, count]) => {
+//             console.log(`   ${doctor}: ${count} slots`);
+//         });
+
+//         console.log('\n📅 Slots per Day:');
+//         Object.entries(slotsByDay).forEach(([date, count]) => {
+//             console.log(`   ${date}: ${count} slots total`);
+//         });
+
+//         console.log('\n📈 Summary:');
+//         console.log(`   Total doctors: ${schedules.length}`);
+//         console.log(`   Total slots: ${totalSlots}`);
+//         console.log(`   Average slots per doctor: ${Math.round(totalSlots / schedules.length)}`);
+//         console.log(`   Expected slots per doctor per day: 18`);
+//         console.log('');
+
+//         console.log('='.repeat(60));
+//         console.log('🎉 SLOT CREATION COMPLETE!');
+//         console.log('='.repeat(60));
+
+//     } catch (error) {
+//         console.error('❌ Slot creation failed:', error);
+//         console.error(error.stack);
+//     }
+// }
+
+// // Run the script
+// addSlotsForCurrentWeek();
+
+import fhirService from '../services/fhirService.js';
+import 'dotenv/config';
+
+/**
+ * Update existing hospital organization to add Twilio phone extension
+ * This fixes the "Hospital does not have a Twilio phone number configured" error
+ */
+
+async function updateHospitalTwilioExtension() {
+    console.log('🔧 Updating Hospital Twilio Extension...\n');
+
+    try {
+        // Step 1: Search for the hospital by Twilio phone identifier
+        const twilioNumber = '+19499971087';
+        console.log(`🔍 Searching for hospital with Twilio number: ${twilioNumber}`);
+
+        const searchResult = await fhirService.searchOrganizations({
+            identifier: `http://hospital-system/twilio-phone|${twilioNumber}`
+        });
+
+        if (!searchResult.success || searchResult.total === 0) {
+            console.error('❌ Hospital not found with the specified Twilio number');
+            console.log('💡 Run syncOrganizations.js to create the hospital first');
+            return { success: false, error: 'Hospital not found' };
+        }
+
+        const hospital = searchResult.entries[0].resource;
+        const hospitalId = hospital.id;
+
+        console.log(`✅ Found hospital: ${hospital.name}`);
+        console.log(`   ID: ${hospitalId}`);
+        console.log(`   Current extensions: ${hospital.extension?.length || 0}`);
+
+        // Step 2: Check if Twilio extension already exists
+        const twilioExtUrl = 'http://hospital-system/twilio-phone-number';
+        const existingTwilioExt = hospital.extension?.find(ext =>
+            ext.url === twilioExtUrl
+        );
+
+        if (existingTwilioExt) {
+            console.log('✅ Twilio extension already exists!');
+            console.log(`   Current value: ${existingTwilioExt.valueString}`);
+
+            if (existingTwilioExt.valueString === twilioNumber) {
+                console.log('✅ Extension value is correct. No update needed.');
+                return {
+                    success: true,
+                    message: 'Extension already configured correctly',
+                    hospitalId
+                };
+            } else {
+                console.log(`⚠️  Extension value mismatch. Updating...`);
+                existingTwilioExt.valueString = twilioNumber;
+            }
+        } else {
+            console.log('➕ Adding Twilio extension...');
+
+            // Initialize extension array if it doesn't exist
+            if (!hospital.extension) {
+                hospital.extension = [];
+            }
+
+            // Add the Twilio extension at the beginning
+            hospital.extension.unshift({
+                url: twilioExtUrl,
+                valueString: twilioNumber
+            });
+        }
+
+        // Step 3: Update the organization in FHIR
+        console.log(`💾 Updating organization in FHIR...`);
+
+        const updateResult = await fhirService.updateOrganization(hospitalId, hospital);
+
+        if (!updateResult.success) {
+            console.error('❌ Failed to update organization:', updateResult.error);
+            return { success: false, error: updateResult.error };
+        }
+
+        console.log('✅ Hospital organization updated successfully!');
+        console.log('\n📋 Updated Extension:');
+        console.log(`   URL: ${twilioExtUrl}`);
+        console.log(`   Value: ${twilioNumber}`);
+
+        // Step 4: Verify the update
+        console.log('\n🔍 Verifying update...');
+        const verifyResult = await fhirService.getOrganization(hospitalId);
+
+        if (verifyResult.success) {
+            const verifyTwilioExt = verifyResult.data.extension?.find(ext =>
+                ext.url === twilioExtUrl
+            );
+
+            if (verifyTwilioExt && verifyTwilioExt.valueString === twilioNumber) {
+                console.log('✅ Verification successful! Extension is present and correct.');
+            } else {
+                console.log('⚠️  Verification warning: Extension may not be properly saved.');
+            }
+        }
+
+        console.log('\n🎉 Update complete!');
+        console.log('💡 You can now test the chatbot call initiation feature.');
+
+        return {
+            success: true,
+            hospitalId,
+            message: 'Twilio extension added/updated successfully'
+        };
+
+    } catch (error) {
+        console.error('❌ Update failed:', error);
+        console.error(error.stack);
+        return {
+            success: false,
+            error: error.message
+        };
+    }
+}
+
+// Run the update if called directly
+if (import.meta.url === `file://${process.argv[1]}`) {
+    updateHospitalTwilioExtension()
+        .then(result => {
+            if (result.success) {
+                console.log('\n✅ Update completed successfully!');
+                process.exit(0);
+            } else {
+                console.error('\n❌ Update failed');
+                process.exit(1);
+            }
+        })
+        .catch(error => {
+            console.error('❌ Unexpected error:', error);
+            process.exit(1);
+        });
+}
+
+export default updateHospitalTwilioExtension;

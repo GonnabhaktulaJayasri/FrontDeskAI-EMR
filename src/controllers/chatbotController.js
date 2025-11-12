@@ -965,9 +965,48 @@ export const sendMessage = async (req, res) => {
                 if (state.appointmentData.collectionStage === 'confirm' && !state.callAttempted) {
                     if (lowerMessage.includes('yes') || lowerMessage.includes('correct') ||
                         lowerMessage.includes('confirm') || lowerMessage.includes('right')) {
-                        const hospitalId = process.env.DEFAULT_HOSPITAL_ID || null;
+
+                        let hospitalId = null;
+                        const twilioNumber = '+19499971087';
 
                         try {
+                            console.log('🏥 Searching for hospital with Twilio number...');
+
+                            // Try identifier search first (fast)
+                            const identifierResult = await fhirService.searchOrganizations({
+                                identifier: `http://hospital-system/twilio-phone|${twilioNumber}`
+                            });
+
+                            if (identifierResult.success && identifierResult.total > 0) {
+                                hospitalId = identifierResult.entries[0].resource.id;
+                                console.log(`✅ Found hospital via identifier: ${hospitalId}`);
+                            } else {
+                                // Fallback: search through extensions
+                                console.log('⚠️ Identifier search failed, trying extension search...');
+                                const allOrgs = await fhirService.searchOrganizations({ _count: 100 });
+
+                                if (allOrgs.success && allOrgs.entries.length > 0) {
+                                    for (const entry of allOrgs.entries) {
+                                        const org = entry.resource;
+                                        const twilioExt = org.extension?.find(ext =>
+                                            ext.url === 'http://hospital-system/twilio-phone-number' &&
+                                            ext.valueString === twilioNumber
+                                        );
+
+                                        if (twilioExt) {
+                                            hospitalId = org.id;
+                                            console.log(`✅ Found hospital via extension: ${hospitalId}`);
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Validate hospital was found
+                            if (!hospitalId) {
+                                throw new Error(`No hospital found with Twilio number ${twilioNumber}`);
+                            }
+
                             const callResult = await initiateCall(
                                 state.patientData.phone,
                                 state.patientData,
